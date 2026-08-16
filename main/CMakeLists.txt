@@ -1,0 +1,17 @@
+idf_component_register(
+    SRCS
+        "main.cpp"
+    INCLUDE_DIRS
+        "include"
+        "include/interfaces"
+    REQUIRES
+        idf_hals
+        smart-farm-common
+        espnow_manager
+        ui_inputs
+        time_manager
+        driver
+        esp_timer
+        nvs_flash
+        freertos
+)
