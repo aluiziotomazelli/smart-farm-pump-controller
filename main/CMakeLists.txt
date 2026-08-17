@@ -3,6 +3,7 @@ idf_component_register(
         "main.cpp"
         "src/pump_state_machine.cpp"
         "src/pump_command_handler.cpp"
+        "src/pump_status_reporter.cpp"
     INCLUDE_DIRS
         "include"
         "include/interfaces"

@@ -28,3 +28,15 @@ struct PumpStateMachineConfig
     uint32_t demagnetization_delay_ms{150}; ///< Delay between de-energizing one and energizing another
     bool enable_output_validation{false};   ///< If true, queries IOutputMonitor before/after actuation
 };
+
+/**
+ * @struct PumpStatusReporterConfig
+ * @brief Configuration parameters for periodic and event-driven status reporting.
+ */
+struct PumpStatusReporterConfig
+{
+    uint8_t circuit_id{0};                            ///< Circuit ID to report (default 0)
+    uint32_t heartbeat_interval_ms{5000};             ///< Periodic reporting interval (default 5s)
+    farm::NodeId dest_node_id{farm::NodeId::HUB};     ///< Destination node (Hub)
+    bool require_ack{false};                          ///< True if telemetry requires transport ACK
+};
