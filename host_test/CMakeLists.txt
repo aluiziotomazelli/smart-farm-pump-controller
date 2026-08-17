@@ -4,6 +4,9 @@ project(pump_controller_host_tests NONE)
 # Enable CTest for this project
 include(CTest)
 
+# Define the tests for CTest
+add_test(NAME test_pump_state_machine COMMAND ../test_pump_state_machine/build/test_pump_state_machine.elf)
+
 # Unified Coverage Configuration
 find_program(LCOV_PATH lcov REQUIRED)
 find_program(GENHTML_PATH genhtml REQUIRED)

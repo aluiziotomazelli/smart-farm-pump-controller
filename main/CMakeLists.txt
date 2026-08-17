@@ -1,6 +1,7 @@
 idf_component_register(
     SRCS
         "main.cpp"
+        "src/pump_state_machine.cpp"
     INCLUDE_DIRS
         "include"
         "include/interfaces"
