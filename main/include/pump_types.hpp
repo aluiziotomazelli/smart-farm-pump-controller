@@ -2,7 +2,20 @@
 #pragma once
 
 #include <cstdint>
+#include "driver/gpio.h"
 #include "farm_protocol_types.hpp"
+
+/**
+ * @struct ContactorConfig
+ * @brief Hardware pinout and polarity configuration for contactor coils/gates.
+ */
+struct ContactorConfig
+{
+    gpio_num_t grid_gpio{GPIO_NUM_5};       ///< D3 on Xiao C3 (Grid Contactor Gate)
+    gpio_num_t solar_gpio{GPIO_NUM_6};      ///< D4 on Xiao C3 (Solar Contactor Gate)
+    uint8_t active_level{1};                ///< 1 for active-high (MOC/TRIAC), 0 for active-low (Relay)
+    uint32_t demagnetization_delay_ms{150}; ///< Safety delay between switching sources
+};
 
 /**
  * @struct PumpStateSnapshot

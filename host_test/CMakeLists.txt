@@ -8,6 +8,8 @@ include(CTest)
 add_test(NAME test_pump_state_machine COMMAND ../test_pump_state_machine/build/test_pump_state_machine.elf)
 add_test(NAME test_pump_command_handler COMMAND ../test_pump_command_handler/build/test_pump_command_handler.elf)
 add_test(NAME test_pump_status_reporter COMMAND ../test_pump_status_reporter/build/test_pump_status_reporter.elf)
+add_test(NAME test_contactor_controller COMMAND ../test_contactor_controller/build/test_contactor_controller.elf)
+add_test(NAME test_pump_led_controller COMMAND ../test_pump_led_controller/build/test_pump_led_controller.elf)
 
 # Unified Coverage Configuration
 find_program(LCOV_PATH lcov REQUIRED)
