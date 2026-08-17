@@ -10,6 +10,7 @@ add_test(NAME test_pump_command_handler COMMAND ../test_pump_command_handler/bui
 add_test(NAME test_pump_status_reporter COMMAND ../test_pump_status_reporter/build/test_pump_status_reporter.elf)
 add_test(NAME test_contactor_controller COMMAND ../test_contactor_controller/build/test_contactor_controller.elf)
 add_test(NAME test_pump_led_controller COMMAND ../test_pump_led_controller/build/test_pump_led_controller.elf)
+add_test(NAME test_pump_controller COMMAND ../test_pump_controller/build/test_pump_controller.elf)
 
 # Unified Coverage Configuration
 find_program(LCOV_PATH lcov REQUIRED)
@@ -35,4 +36,25 @@ add_custom_target(coverage_clean
     COMMAND ${CMAKE_COMMAND} -E rm -rf ${UNIFIED_COVERAGE_DIR}
     WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
     COMMENT "Cleaning up coverage data"
+)
+
+# Helper target to build all tests at once
+add_custom_target(build_all_tests
+    COMMAND idf.py -C ../test_pump_state_machine build
+    COMMAND idf.py -C ../test_pump_command_handler build
+    COMMAND idf.py -C ../test_pump_status_reporter build
+    COMMAND idf.py -C ../test_contactor_controller build
+    COMMAND idf.py -C ../test_pump_led_controller build
+    COMMAND idf.py -C ../test_pump_controller build
+    COMMENT "Building all test projects using idf.py"
+)
+
+# Unified target to build, clean, run all tests and generate coverage
+add_custom_target(run_all_tests
+    COMMAND ${CMAKE_COMMAND} --build . --target build_all_tests
+    COMMAND ${CMAKE_COMMAND} --build . --target coverage_clean
+    COMMAND ${CMAKE_CTEST_COMMAND} --output-on-failure
+    COMMAND ${CMAKE_COMMAND} --build . --target unified_coverage
+    WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+    COMMENT "Full test cycle: build, clean, run, and coverage"
 )

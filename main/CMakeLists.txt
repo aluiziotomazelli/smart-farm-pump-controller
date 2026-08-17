@@ -6,6 +6,7 @@ idf_component_register(
         "src/pump_status_reporter.cpp"
         "src/contactor_controller.cpp"
         "src/pump_led_controller.cpp"
+        "src/pump_controller.cpp"
     INCLUDE_DIRS
         "include"
         "include/interfaces"

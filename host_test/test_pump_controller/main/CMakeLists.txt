@@ -1,0 +1,39 @@
+idf_component_register(
+    SRCS 
+        "main.cpp"
+        "test_pump_controller.cpp"
+        "../../../main/src/pump_controller.cpp"
+        "../../../main/src/pump_command_handler.cpp"
+    INCLUDE_DIRS 
+        "."
+        "../../mocks"
+        "../../../main/include"
+        "../../../main/include/interfaces"
+        "../../../main"
+        "../../../components/smart-farm-common/include"
+        "../../../components/smart-farm-common/include/interfaces"
+        "../../../components/espnow_manager/include"
+        "../../../components/espnow_manager/include/interfaces"
+        "../../../components/time_manager/include"
+        "../../../components/time_manager/include/interfaces"
+        "../../../components/time_manager/host_test/mocks"
+        "../../../components/ui_inputs/include"
+        "../../../components/ui_inputs/include/interfaces"
+        "../../../components/idf_hals/include"
+        "../../../components/idf_hals/include/interfaces"
+        "../../../components/idf_hals/mocks"
+    REQUIRES 
+        gtest
+        smart-farm-common
+        espnow_manager
+        time_manager
+        ui_inputs
+        idf_hals
+        WHOLE_ARCHIVE
+)
+
+if(IDF_TARGET STREQUAL "linux")
+    target_compile_definitions(${COMPONENT_LIB} PRIVATE PROJ_HOST_TEST)
+    target_compile_options(${COMPONENT_LIB} PUBLIC --coverage)
+    target_link_options(${COMPONENT_LIB} PUBLIC --coverage)
+endif()
