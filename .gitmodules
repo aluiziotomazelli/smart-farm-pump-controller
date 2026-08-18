@@ -18,3 +18,6 @@
 	path = components/time_manager
 	url = https://github.com/aluiziotomazelli/time_manager.git
 	branch = main
+[submodule "components/wifi_manager"]
+	path = components/wifi_manager
+	url = https://github.com/aluiziotomazelli/wifi_manager

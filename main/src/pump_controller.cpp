@@ -33,6 +33,7 @@ PumpController::PumpController(
     ui_inputs::ISwitch& switch_mode,
     ui_inputs::ISwitch& switch_source,
     ui_inputs::IButton& button_action,
+    wifi_manager::IWiFiManager& wifi_manager,
     idf_hals::IHalFreertos& hal_rtos,
     idf_hals::ISystemHAL& hal_system)
     : core_storage_(core_storage)
@@ -45,6 +46,7 @@ PumpController::PumpController(
     , switch_mode_(switch_mode)
     , switch_source_(switch_source)
     , button_action_(button_action)
+    , wifi_manager_(wifi_manager)
     , hal_rtos_(hal_rtos)
     , hal_system_(hal_system)
 {

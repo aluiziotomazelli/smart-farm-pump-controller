@@ -16,6 +16,7 @@
 #include "mock_hal_system.hpp"
 #include "mock_nvs_core.hpp"
 #include "mock_pump_nvs.hpp"
+#include "mock_i_wifi_manager.hpp"
 
 using ::testing::_;
 using ::testing::DoAll;
@@ -37,6 +38,7 @@ protected:
     NiceMock<ui_inputs::MockSwitch> switch_mode_;
     NiceMock<ui_inputs::MockSwitch> switch_source_;
     NiceMock<ui_inputs::MockButton> button_action_;
+    NiceMock<wifi_manager::MockWiFiManager> mock_wifi_;
     NiceMock<idf_hals::MockHalFreertos> hal_rtos_;
     NiceMock<idf_hals::MockSystemHAL> hal_system_;
 
@@ -91,6 +93,7 @@ protected:
             switch_mode_,
             switch_source_,
             button_action_,
+            mock_wifi_,
             hal_rtos_,
             hal_system_);
     }

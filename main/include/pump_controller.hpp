@@ -14,6 +14,7 @@
 #include "interfaces/i_hal_system.hpp"
 #include "interfaces/i_nvs_core.hpp"
 #include "interfaces/i_pump_nvs.hpp"
+#include "interfaces/i_wifi_manager.hpp"
 #include "pump_command_handler.hpp"
 #include "pump_stats.hpp"
 #include "core_types.hpp"
@@ -36,6 +37,7 @@ public:
         ui_inputs::ISwitch& switch_mode,
         ui_inputs::ISwitch& switch_source,
         ui_inputs::IButton& button_action,
+        wifi_manager::IWiFiManager& wifi_manager,
         idf_hals::IHalFreertos& hal_rtos,
         idf_hals::ISystemHAL& hal_system);
 
@@ -78,6 +80,7 @@ private:
     ui_inputs::ISwitch& switch_mode_;
     ui_inputs::ISwitch& switch_source_;
     ui_inputs::IButton& button_action_;
+    wifi_manager::IWiFiManager& wifi_manager_;
     idf_hals::IHalFreertos& hal_rtos_;
     idf_hals::ISystemHAL& hal_system_;
 

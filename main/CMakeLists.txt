@@ -21,6 +21,7 @@ idf_component_register(
         idf_hals
         smart-farm-common
         espnow_manager
+        wifi_manager
         ui_inputs
         time_manager
         driver

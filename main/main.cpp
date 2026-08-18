@@ -20,6 +20,7 @@
 #include "pump_nvs.hpp"
 #include "pump_stats.hpp"
 #include "espnow_manager.hpp"
+#include "wifi_manager.hpp"
 #include "time_manager.hpp"
 #include "led_controller.hpp"
 #include "contactor_controller.hpp"
@@ -141,8 +142,9 @@ extern "C" void app_main()
     // Create ESP-NOW receive queue
     QueueHandle_t rx_queue = hal_freertos.queue_create(30, sizeof(espnow::AppMessage));
 
-    // Get ESP-NOW singleton
+    // Get singletons
     auto& espnow = espnow::EspNowManager::instance();
+    auto& wifi = wifi_manager::WiFiManager::get_instance();
 
     // Instantiate Command Handler
     PumpCommandHandler command_handler{
@@ -165,6 +167,7 @@ extern "C" void app_main()
         switch_mode,
         switch_source,
         button_action,
+        wifi,
         hal_freertos,
         hal_system};
 

@@ -15,6 +15,8 @@ idf_component_register(
         "../../../components/smart-farm-common/host_test/common"
         "../../../components/espnow_manager/include"
         "../../../components/espnow_manager/include/interfaces"
+        "../../../components/wifi_manager/include"
+        "../../../components/wifi_manager/include/interfaces"
         "../../../components/time_manager/include"
         "../../../components/time_manager/include/interfaces"
         "../../../components/time_manager/host_test/mocks"
@@ -27,6 +29,7 @@ idf_component_register(
         gtest
         smart-farm-common
         espnow_manager
+        wifi_manager
         time_manager
         ui_inputs
         idf_hals
