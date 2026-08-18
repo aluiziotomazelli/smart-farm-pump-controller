@@ -12,6 +12,7 @@ idf_component_register(
         "../../../main"
         "../../../components/smart-farm-common/include"
         "../../../components/smart-farm-common/include/interfaces"
+        "../../../components/smart-farm-common/host_test/common"
         "../../../components/espnow_manager/include"
         "../../../components/espnow_manager/include/interfaces"
         "../../../components/time_manager/include"

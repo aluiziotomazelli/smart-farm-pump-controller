@@ -71,17 +71,17 @@ To prevent catastrophic short-circuits between unsynchronized AC sources (Grid a
 
 | Pin | GPIO | Identifier | Direction | Description | Active Level |
 | :--- | :--- | :--- | :--- | :--- | :--- |
-| **D0** | `GPIO 2` | `PIN_SWITCH_MODE` | Input | Mode Selector (`AUTO` / `MANUAL`) | Low (Pull-Up, Closed = AUTO) |
-| **D1** | `GPIO 3` | `PIN_SWITCH_SOURCE` | Input | Manual Source Selector (`SOLAR` / `GRID`) | Low (Pull-Up, Closed = SOLAR) |
-| **D2** | `GPIO 4` | `PIN_BUTTON_START` | Input | Manual Start Pushbutton | Low (Pull-Up, Press = Start) |
+| **D0** | `GPIO 2` | `PIN_BUTTON_ACTION` | Input | Manual Start/Stop Toggle Pushbutton | Low (Pull-Up, Press = Toggle) |
+| **D1** | `GPIO 3` | `PIN_SWITCH_MODE` | Input | Mode Selector (`AUTO` / `MANUAL`) | Low (Pull-Up, Closed = AUTO) |
+| **D2** | `GPIO 4` | `PIN_SWITCH_SOURCE` | Input | Manual Source Selector (`SOLAR` / `GRID`) | Low (Pull-Up, Closed = SOLAR) |
 | **D3** | `GPIO 5` | `PIN_CONTACTOR_GRID` | Output | Grid Contactor Gate Trigger | High (MOC) / Low (Relay) |
 | **D4** | `GPIO 6` | `PIN_CONTACTOR_SOLAR`| Output | Solar Contactor Gate Trigger | High (MOC) / Low (Relay) |
-| **D5** | `GPIO 7` | `PIN_BUTTON_STOP` | Input | Manual Stop Pushbutton | Low (Pull-Up, Press = Stop) |
+| **D5** | `GPIO 7` | *(Reserved)* | - | Auxiliary Sensor / Expansion | - |
 | **D6** | `GPIO 21`| `PIN_LED_GRID` | Output | Grid Status LED (Green) | High (Active-High) |
 | **D7** | `GPIO 20`| `PIN_LED_SOLAR` | Output | Solar Status LED (Yellow) | High (Active-High) |
-| **D8** | `GPIO 8` | *(Reserved)* | - | Auxiliary Sensor / Diagnostic | - |
-| **D9** | `GPIO 9` | *(Phase 2)* | Output | WS2812 Tank Level Indicator Data | High (RMT) |
-| **D10**| `GPIO 10`| *(Phase 2)* | Input | Output Voltage AC Monitor | Low/High |
+| **D8** | `GPIO 8` | `PIN_WS2812_DATA` | Output | WS2812 Tank Level Indicator Data (Phase 2) | High (RMT) |
+| **D9** | `GPIO 9` | `PIN_BUTTON_BOOT_OTA`| Input | Onboard BOOT Button / Emergency OTA Trigger | Low (Pull-Up, Press = OTA) |
+| **D10**| `GPIO 10`| `PIN_OUTPUT_MONITOR` | Input | Output Voltage AC Monitor (Phase 2) | Low/High |
 
 ---
 

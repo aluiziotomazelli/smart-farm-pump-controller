@@ -14,6 +14,8 @@
 #include "mock_time_manager.hpp"
 #include "mock_hal_freertos.hpp"
 #include "mock_hal_system.hpp"
+#include "mock_nvs_core.hpp"
+#include "mock_pump_nvs.hpp"
 
 using ::testing::_;
 using ::testing::DoAll;
@@ -24,6 +26,8 @@ using ::testing::SaveArg;
 class PumpControllerTest : public ::testing::Test
 {
 protected:
+    NiceMock<MockNvsCore> nvs_core_;
+    NiceMock<MockPumpNvs> pump_nvs_;
     NiceMock<MockPumpStateMachine> state_machine_;
     NiceMock<espnow::MockEspNowManager> espnow_;
     NiceMock<time_manager::MockTimeManager> time_manager_;
@@ -32,12 +36,10 @@ protected:
     NiceMock<MockPumpLedController> led_controller_;
     NiceMock<ui_inputs::MockSwitch> switch_mode_;
     NiceMock<ui_inputs::MockSwitch> switch_source_;
-    NiceMock<ui_inputs::MockButton> button_start_;
-    NiceMock<ui_inputs::MockButton> button_stop_;
+    NiceMock<ui_inputs::MockButton> button_action_;
     NiceMock<idf_hals::MockHalFreertos> hal_rtos_;
     NiceMock<idf_hals::MockSystemHAL> hal_system_;
 
-    CoreStorage core_{};
     QueueHandle_t dummy_queue_ = reinterpret_cast<QueueHandle_t>(0x5678);
 
     std::unique_ptr<PumpCommandHandler> command_handler_;
@@ -45,6 +47,11 @@ protected:
 
     void SetUp() override
     {
+        ON_CALL(nvs_core_, init(_, _)).WillByDefault(Return(ESP_OK));
+        ON_CALL(nvs_core_, save_core(_, _)).WillByDefault(Return(ESP_OK));
+        ON_CALL(pump_nvs_, init_app_data(_, _)).WillByDefault(Return(ESP_OK));
+        ON_CALL(pump_nvs_, save_app_data(_, _)).WillByDefault(Return(ESP_OK));
+
         ON_CALL(state_machine_, init()).WillByDefault(Return(ESP_OK));
         ON_CALL(status_reporter_, init()).WillByDefault(Return(ESP_OK));
         ON_CALL(led_controller_, init()).WillByDefault(Return(ESP_OK));
@@ -52,8 +59,7 @@ protected:
         ON_CALL(tank_display_, init()).WillByDefault(Return(ESP_OK));
         ON_CALL(switch_mode_, init()).WillByDefault(Return(ESP_OK));
         ON_CALL(switch_source_, init()).WillByDefault(Return(ESP_OK));
-        ON_CALL(button_start_, init()).WillByDefault(Return(ESP_OK));
-        ON_CALL(button_stop_, init()).WillByDefault(Return(ESP_OK));
+        ON_CALL(button_action_, init()).WillByDefault(Return(ESP_OK));
         ON_CALL(hal_rtos_, queue_receive(_, _, _)).WillByDefault(Return(pdFALSE));
         ON_CALL(hal_rtos_, task_create(_, _, _, _, _, _)).WillByDefault(Return(pdPASS));
 
@@ -72,10 +78,11 @@ protected:
             state_machine_,
             time_manager_,
             tank_display_,
-            core_,
             hal_rtos_);
 
         sut_ = std::make_unique<PumpController>(
+            nvs_core_,
+            pump_nvs_,
             state_machine_,
             *command_handler_,
             status_reporter_,
@@ -83,23 +90,23 @@ protected:
             tank_display_,
             switch_mode_,
             switch_source_,
-            button_start_,
-            button_stop_,
+            button_action_,
             hal_rtos_,
             hal_system_);
     }
 };
 
-TEST_F(PumpControllerTest, InitInitializesAllSubsystems)
+TEST_F(PumpControllerTest, InitInitializesAllSubsystemsAndStorage)
 {
+    EXPECT_CALL(nvs_core_, init(_, _)).WillOnce(Return(ESP_OK));
+    EXPECT_CALL(pump_nvs_, init_app_data(_, _)).WillOnce(Return(ESP_OK));
     EXPECT_CALL(state_machine_, init()).WillOnce(Return(ESP_OK));
     EXPECT_CALL(status_reporter_, init()).WillOnce(Return(ESP_OK));
     EXPECT_CALL(led_controller_, init()).WillOnce(Return(ESP_OK));
     EXPECT_CALL(tank_display_, init()).WillOnce(Return(ESP_OK));
     EXPECT_CALL(switch_mode_, init()).WillOnce(Return(ESP_OK));
     EXPECT_CALL(switch_source_, init()).WillOnce(Return(ESP_OK));
-    EXPECT_CALL(button_start_, init()).WillOnce(Return(ESP_OK));
-    EXPECT_CALL(button_stop_, init()).WillOnce(Return(ESP_OK));
+    EXPECT_CALL(button_action_, init()).WillOnce(Return(ESP_OK));
 
     EXPECT_EQ(sut_->init(), ESP_OK);
 }
@@ -127,7 +134,7 @@ TEST_F(PumpControllerTest, TickSamplesSwitchModeAutoAndUpdatesStateMachine)
     sut_->tick(50);
 }
 
-TEST_F(PumpControllerTest, TickSamplesSwitchModeManualAndHandlesStartButton)
+TEST_F(PumpControllerTest, TickSamplesSwitchModeManualAndHandlesActionButtonStartsPumpWhenOff)
 {
     // Mode switch OPEN -> MANUAL mode
     EXPECT_CALL(switch_mode_, get_state()).WillOnce(Return(ui_inputs::SwitchState::OPEN));
@@ -136,30 +143,47 @@ TEST_F(PumpControllerTest, TickSamplesSwitchModeManualAndHandlesStartButton)
     // Source switch CLOSED -> SOLAR
     EXPECT_CALL(switch_source_, get_state()).WillOnce(Return(ui_inputs::SwitchState::CLOSED));
 
-    // Start button clicked
-    EXPECT_CALL(button_start_, get_last_click()).WillOnce(Return(ui_inputs::ButtonClickType::CLICK));
-    EXPECT_CALL(button_stop_, get_last_click()).WillOnce(Return(ui_inputs::ButtonClickType::NONE_CLICK));
+    // Action button clicked when pump is IDLE
+    EXPECT_CALL(button_action_, get_last_click()).WillOnce(Return(ui_inputs::ButtonClickType::CLICK));
+    PumpStateSnapshot idle_snapshot{
+        .state = farm::LoadState::IDLE,
+        .mode = farm::ControlMode::MANUAL,
+        .source = farm::PowerSource::UNKNOWN,
+        .runtime_s = 0,
+        .remaining_watchdog_s = 0,
+        .state_changed = false};
+    EXPECT_CALL(state_machine_, get_snapshot()).WillOnce(Return(idle_snapshot)).WillRepeatedly(Return(idle_snapshot));
 
-    EXPECT_CALL(state_machine_, handle_manual_start(farm::PowerSource::SOLAR)).Times(1);
+    EXPECT_CALL(state_machine_, handle_manual_start(farm::PowerSource::SOLAR)).WillOnce(Return(ESP_OK));
+    EXPECT_CALL(pump_nvs_, save_app_data(_, false)).Times(1);
 
     sut_->tick(50);
+    EXPECT_EQ(sut_->get_stats().manual_starts_total, 1);
+    EXPECT_EQ(sut_->get_stats().start_cycles_total, 1);
 }
 
-TEST_F(PumpControllerTest, TickSamplesSwitchModeManualAndHandlesStopButton)
+TEST_F(PumpControllerTest, TickSamplesSwitchModeManualAndHandlesActionButtonStopsPumpWhenRunning)
 {
     // Mode switch OPEN -> MANUAL mode
     EXPECT_CALL(switch_mode_, get_state()).WillOnce(Return(ui_inputs::SwitchState::OPEN));
 
-    // Stop button clicked
-    EXPECT_CALL(button_start_, get_last_click()).WillOnce(Return(ui_inputs::ButtonClickType::NONE_CLICK));
-    EXPECT_CALL(button_stop_, get_last_click()).WillOnce(Return(ui_inputs::ButtonClickType::CLICK));
+    // Action button clicked when pump is RUNNING
+    EXPECT_CALL(button_action_, get_last_click()).WillOnce(Return(ui_inputs::ButtonClickType::CLICK));
+    PumpStateSnapshot running_snapshot{
+        .state = farm::LoadState::RUNNING,
+        .mode = farm::ControlMode::MANUAL,
+        .source = farm::PowerSource::SOLAR,
+        .runtime_s = 15,
+        .remaining_watchdog_s = 3585,
+        .state_changed = false};
+    EXPECT_CALL(state_machine_, get_snapshot()).WillOnce(Return(running_snapshot)).WillRepeatedly(Return(running_snapshot));
 
     EXPECT_CALL(state_machine_, handle_manual_stop()).Times(1);
 
     sut_->tick(50);
 }
 
-TEST_F(PumpControllerTest, TickHandlesRebootCommandGracefully)
+TEST_F(PumpControllerTest, TickHandlesRebootCommandGracefullyAndPersistsState)
 {
     // Mock queue returning a REBOOT command
     espnow::AppMessage reboot_msg{};
@@ -174,8 +198,30 @@ TEST_F(PumpControllerTest, TickHandlesRebootCommandGracefully)
         })
         .WillRepeatedly(Return(pdFALSE));
 
+    EXPECT_CALL(nvs_core_, save_core(_, true)).Times(1);
+    EXPECT_CALL(pump_nvs_, save_app_data(_, true)).Times(1);
     EXPECT_CALL(state_machine_, handle_manual_stop()).Times(1);
     EXPECT_CALL(hal_system_, restart()).Times(1);
 
     sut_->tick(50);
+}
+
+TEST_F(PumpControllerTest, TickRuntimeAccountingIncrementsHourmeter)
+{
+    PumpStateSnapshot running_snapshot{
+        .state = farm::LoadState::RUNNING,
+        .mode = farm::ControlMode::AUTO,
+        .source = farm::PowerSource::SOLAR,
+        .runtime_s = 10,
+        .remaining_watchdog_s = 3590,
+        .state_changed = false};
+    EXPECT_CALL(state_machine_, get_snapshot()).WillRepeatedly(Return(running_snapshot));
+
+    // Tick 1000 ms -> should increment runtime by 1s
+    EXPECT_CALL(pump_nvs_, save_app_data(_, false)).Times(1);
+    sut_->tick(1000);
+
+    EXPECT_EQ(sut_->get_stats().total_runtime_s, 1);
+    EXPECT_EQ(sut_->get_stats().solar_runtime_s, 1);
+    EXPECT_EQ(sut_->get_stats().grid_runtime_s, 0);
 }

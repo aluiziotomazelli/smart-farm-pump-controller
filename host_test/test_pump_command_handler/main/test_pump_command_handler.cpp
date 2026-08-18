@@ -26,7 +26,7 @@ protected:
     NiceMock<time_manager::MockTimeManager> time_manager_;
     NiceMock<MockTankLevelDisplay> tank_display_;
     NiceMock<idf_hals::MockHalFreertos> hal_rtos_;
-    CoreStorage core_{};
+    CoreData core_{};
     QueueHandle_t dummy_queue_ = reinterpret_cast<QueueHandle_t>(0x1234);
 
     std::unique_ptr<PumpCommandHandler> sut_;
@@ -46,8 +46,8 @@ protected:
             state_machine_,
             time_manager_,
             tank_display_,
-            core_,
-            hal_rtos_);
+            hal_rtos_,
+            &core_);
     }
 
     void SetupQueueWithMessages(const std::vector<espnow::AppMessage>& messages)
@@ -75,8 +75,8 @@ TEST_F(PumpCommandHandlerTest, NullQueueReturnsDefaultResult)
         state_machine_,
         time_manager_,
         tank_display_,
-        core_,
-        hal_rtos_);
+        hal_rtos_,
+        &core_);
 
     auto res = null_handler.process();
     EXPECT_FALSE(res.core_modified);

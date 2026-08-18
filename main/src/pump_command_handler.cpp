@@ -1,17 +1,17 @@
-// main/src/pump_command_handler.cpp
 #include <cstdint>
 #include <cstring>
 
+#undef LOG_LOCAL_LEVEL
 #define LOG_LOCAL_LEVEL ESP_LOG_INFO
 #include "esp_log.h"
 
+#include "pump_command_handler.hpp"
+#include "farm_protocol_types.hpp"
 #include "interfaces/i_espnow_manager.hpp"
 #include "interfaces/i_pump_state_machine.hpp"
 #include "interfaces/i_time_manager.hpp"
 #include "interfaces/i_tank_level_display.hpp"
 #include "interfaces/i_hal_freertos.hpp"
-#include "pump_command_handler.hpp"
-#include "farm_protocol_types.hpp"
 
 static const char* TAG = "PumpCommandHandler";
 
@@ -21,15 +21,15 @@ PumpCommandHandler::PumpCommandHandler(
     IPumpStateMachine& state_machine,
     time_manager::ITimeManager& time_manager,
     ITankLevelDisplay& tank_display,
-    CoreStorage& core,
-    idf_hals::IHalFreertos& hal_freertos)
+    idf_hals::IHalFreertos& hal_freertos,
+    CoreData* core)
     : rx_queue_(rx_queue)
     , espnow_(espnow)
     , state_machine_(state_machine)
     , time_manager_(time_manager)
     , tank_display_(tank_display)
-    , core_(core)
     , hal_freertos_(hal_freertos)
+    , core_(core)
 {
 }
 
@@ -108,8 +108,10 @@ void PumpCommandHandler::process_command_message(const espnow::AppMessage& msg, 
             const auto* packet = reinterpret_cast<const time_manager::TimeSyncPacket*>(msg.payload);
             esp_err_t err = time_manager_.sync_from_time_packet(*packet);
             if (err == ESP_OK) {
-                core_.has_valid_time = time_manager_.is_synchronized();
-                core_.last_sync_unix_time_ms = time_manager_.get_timestamp_ms();
+                if (core_ != nullptr) {
+                    core_->has_valid_time = time_manager_.is_synchronized();
+                    core_->last_sync_unix_time_ms = time_manager_.get_timestamp_ms();
+                }
                 result.core_modified = true;
                 if (msg.requires_ack) {
                     espnow_.confirm_reception(msg.sender_id, msg.sequence_number, espnow::AckStatus::OK);

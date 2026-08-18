@@ -32,8 +32,10 @@ public:
         IPumpStateMachine& state_machine,
         time_manager::ITimeManager& time_manager,
         ITankLevelDisplay& tank_display,
-        CoreStorage& core,
-        idf_hals::IHalFreertos& hal_freertos);
+        idf_hals::IHalFreertos& hal_freertos,
+        CoreData* core = nullptr);
+
+    void set_core_data(CoreData& core) { core_ = &core; }
 
     /**
      * @brief Drains all available messages in rx_queue and executes corresponding handlers.
@@ -47,8 +49,8 @@ private:
     IPumpStateMachine& state_machine_;
     time_manager::ITimeManager& time_manager_;
     ITankLevelDisplay& tank_display_;
-    CoreStorage& core_;
     idf_hals::IHalFreertos& hal_freertos_;
+    CoreData* core_{nullptr};
 
     void process_command_message(const espnow::AppMessage& msg, PumpCommandProcessResult& result);
     void process_data_message(const espnow::AppMessage& msg, PumpCommandProcessResult& result);
