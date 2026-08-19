@@ -17,6 +17,7 @@ idf_component_register(
         "../../../components/espnow_manager/include/interfaces"
         "../../../components/wifi_manager/include"
         "../../../components/wifi_manager/include/interfaces"
+        "../../../components/wifi_manager/include/mocks"
         "../../../components/time_manager/include"
         "../../../components/time_manager/include/interfaces"
         "../../../components/time_manager/host_test/mocks"

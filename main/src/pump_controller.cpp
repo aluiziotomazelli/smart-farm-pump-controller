@@ -18,7 +18,9 @@
 #include "interfaces/i_hal_system.hpp"
 #include "interfaces/i_nvs_core.hpp"
 #include "interfaces/i_pump_nvs.hpp"
+#include "interfaces/i_wifi_manager.hpp"
 #include "pump_command_handler.hpp"
+#include "secrets.hpp"
 
 static const char* TAG = "PumpController";
 
@@ -57,63 +59,6 @@ PumpController::~PumpController()
     stop();
 }
 
-esp_err_t PumpController::init_core_storage()
-{
-    CoreData default_core{};
-    default_core.node_id = farm::NodeId::UNKNOWN;
-    default_core.node_type = farm::NodeType::ACTUATOR;
-    default_core.power_profile = farm::PowerProfile::ALWAYS_ON;
-
-    esp_err_t ret = core_storage_.init(core_, default_core);
-    if (ret != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to initialize core storage: %s", esp_err_to_name(ret));
-        return ret;
-    }
-
-    core_storage_.process_boot_reasons(
-        core_, hal_system_.reset_reason(), ESP_SLEEP_WAKEUP_UNDEFINED, pending_core_commit_);
-
-    return ESP_OK;
-}
-
-esp_err_t PumpController::init_pump_storage()
-{
-    PumpStats default_stats{};
-    default_stats.reset();
-
-    esp_err_t ret = pump_storage_.init_app_data(stats_, default_stats);
-    if (ret != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to initialize pump storage: %s", esp_err_to_name(ret));
-        return ret;
-    }
-
-    return ESP_OK;
-}
-
-void PumpController::save_persistent_state(bool force_all)
-{
-    bool force_core = pending_core_commit_ || force_all;
-    bool force_pump = pending_controller_commit_ || force_all;
-
-    if (force_core) {
-        if (core_storage_.save_core(core_, true) == ESP_OK) {
-            pending_core_commit_ = false;
-        }
-        else {
-            ESP_LOGE(TAG, "Failed to save core storage to NVS");
-        }
-    }
-
-    if (force_pump) {
-        if (pump_storage_.save_app_data(stats_, true) == ESP_OK) {
-            pending_controller_commit_ = false;
-        }
-        else {
-            ESP_LOGE(TAG, "Failed to save pump stats to NVS");
-        }
-    }
-}
-
 esp_err_t PumpController::init()
 {
     esp_err_t err = init_core_storage();
@@ -125,6 +70,12 @@ esp_err_t PumpController::init()
     err = init_pump_storage();
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "Failed to init pump storage: %s", esp_err_to_name(err));
+        return err;
+    }
+
+    err = init_wifi();
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to init WiFi: %s", esp_err_to_name(err));
         return err;
     }
 
@@ -212,22 +163,6 @@ void PumpController::stop()
     ESP_LOGI(TAG, "PumpController stopped");
 }
 
-void PumpController::task_entry(void* arg)
-{
-    auto* self = static_cast<PumpController*>(arg);
-    self->run_task();
-}
-
-void PumpController::run_task()
-{
-    const uint32_t loop_period_ms = 50;
-    while (is_running_) {
-        tick(loop_period_ms);
-        hal_rtos_.task_delay(pdMS_TO_TICKS(loop_period_ms));
-    }
-    hal_rtos_.task_delete(nullptr);
-}
-
 void PumpController::tick(uint32_t delta_ms)
 {
     // 1. Sample Switch Inputs
@@ -307,4 +242,108 @@ void PumpController::tick(uint32_t delta_ms)
         nvs_commit_accumulator_ms_ = 0;
         save_persistent_state();
     }
+}
+
+void PumpController::save_persistent_state(bool force_all)
+{
+    bool force_core = pending_core_commit_ || force_all;
+    bool force_pump = pending_controller_commit_ || force_all;
+
+    if (force_core) {
+        if (core_storage_.save_core(core_, true) == ESP_OK) {
+            pending_core_commit_ = false;
+        }
+        else {
+            ESP_LOGE(TAG, "Failed to save core storage to NVS");
+        }
+    }
+
+    if (force_pump) {
+        if (pump_storage_.save_app_data(stats_, true) == ESP_OK) {
+            pending_controller_commit_ = false;
+        }
+        else {
+            ESP_LOGE(TAG, "Failed to save pump stats to NVS");
+        }
+    }
+}
+
+// =============================================================================
+// Private Methods
+// =============================================================================
+
+esp_err_t PumpController::init_core_storage()
+{
+    CoreData default_core{};
+    default_core.node_id = farm::NodeId::UNKNOWN;
+    default_core.node_type = farm::NodeType::ACTUATOR;
+    default_core.power_profile = farm::PowerProfile::ALWAYS_ON;
+
+    esp_err_t ret = core_storage_.init(core_, default_core);
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to initialize core storage: %s", esp_err_to_name(ret));
+        return ret;
+    }
+
+    core_storage_.process_boot_reasons(
+        core_, hal_system_.reset_reason(), ESP_SLEEP_WAKEUP_UNDEFINED, pending_core_commit_);
+
+    return ESP_OK;
+}
+
+esp_err_t PumpController::init_pump_storage()
+{
+    PumpStats default_stats{};
+    default_stats.reset();
+
+    esp_err_t ret = pump_storage_.init_app_data(stats_, default_stats);
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to initialize pump storage: %s", esp_err_to_name(ret));
+        return ret;
+    }
+
+    return ESP_OK;
+}
+
+esp_err_t PumpController::init_wifi()
+{
+    esp_err_t err = wifi_manager_.init();
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to initialize WiFi Manager: %s", esp_err_to_name(err));
+        return err;
+    }
+
+    wifi_manager_.add_credentials(WIFI_SSID, WIFI_PASS);
+
+    err = wifi_manager_.start(10000);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to start WiFi driver: %s", esp_err_to_name(err));
+        return err;
+    }
+
+    ESP_LOGI(TAG, "Connecting to WiFi with sync retries (timeout: 15000 ms, max_retries: 3)...");
+    err = wifi_manager_.connect(15000, 3, 1500);
+    if (err == ESP_OK) {
+        ESP_LOGI(TAG, "WiFi connected successfully via WiFiManager::connect");
+    } else {
+        ESP_LOGW(TAG, "WiFi connection failed after retries: %s; proceeding in standalone mode", esp_err_to_name(err));
+    }
+
+    return ESP_OK;
+}
+
+void PumpController::task_entry(void* arg)
+{
+    auto* self = static_cast<PumpController*>(arg);
+    self->run_task();
+}
+
+void PumpController::run_task()
+{
+    const uint32_t loop_period_ms = 50;
+    while (is_running_) {
+        tick(loop_period_ms);
+        hal_rtos_.task_delay(pdMS_TO_TICKS(loop_period_ms));
+    }
+    hal_rtos_.task_delete(nullptr);
 }

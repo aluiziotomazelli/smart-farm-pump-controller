@@ -97,6 +97,7 @@ private:
 
     esp_err_t init_core_storage();
     esp_err_t init_pump_storage();
+    esp_err_t init_wifi();
 
     static void task_entry(void* arg);
     void run_task();

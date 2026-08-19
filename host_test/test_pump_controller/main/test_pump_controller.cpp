@@ -18,6 +18,8 @@
 #include "mock_pump_nvs.hpp"
 #include "mock_i_wifi_manager.hpp"
 
+#include "secrets.hpp"
+
 using ::testing::_;
 using ::testing::DoAll;
 using ::testing::NiceMock;
@@ -53,6 +55,11 @@ protected:
         ON_CALL(nvs_core_, save_core(_, _)).WillByDefault(Return(ESP_OK));
         ON_CALL(pump_nvs_, init_app_data(_, _)).WillByDefault(Return(ESP_OK));
         ON_CALL(pump_nvs_, save_app_data(_, _)).WillByDefault(Return(ESP_OK));
+
+        ON_CALL(mock_wifi_, init(_)).WillByDefault(Return(ESP_OK));
+        ON_CALL(mock_wifi_, add_credentials(_, _)).WillByDefault(Return(ESP_OK));
+        ON_CALL(mock_wifi_, start(_)).WillByDefault(Return(ESP_OK));
+        ON_CALL(mock_wifi_, connect(_, _, _)).WillByDefault(Return(ESP_OK));
 
         ON_CALL(state_machine_, init()).WillByDefault(Return(ESP_OK));
         ON_CALL(status_reporter_, init()).WillByDefault(Return(ESP_OK));
@@ -103,6 +110,11 @@ TEST_F(PumpControllerTest, InitInitializesAllSubsystemsAndStorage)
 {
     EXPECT_CALL(nvs_core_, init(_, _)).WillOnce(Return(ESP_OK));
     EXPECT_CALL(pump_nvs_, init_app_data(_, _)).WillOnce(Return(ESP_OK));
+    EXPECT_CALL(mock_wifi_, init(_)).WillOnce(Return(ESP_OK));
+    EXPECT_CALL(mock_wifi_, add_credentials(::testing::StrEq(WIFI_SSID), ::testing::StrEq(WIFI_PASS)))
+        .WillOnce(Return(ESP_OK));
+    EXPECT_CALL(mock_wifi_, start(10000)).WillOnce(Return(ESP_OK));
+    EXPECT_CALL(mock_wifi_, connect(15000, 3, 1500)).WillOnce(Return(ESP_OK));
     EXPECT_CALL(state_machine_, init()).WillOnce(Return(ESP_OK));
     EXPECT_CALL(status_reporter_, init()).WillOnce(Return(ESP_OK));
     EXPECT_CALL(led_controller_, init()).WillOnce(Return(ESP_OK));
@@ -110,6 +122,16 @@ TEST_F(PumpControllerTest, InitInitializesAllSubsystemsAndStorage)
     EXPECT_CALL(switch_mode_, init()).WillOnce(Return(ESP_OK));
     EXPECT_CALL(switch_source_, init()).WillOnce(Return(ESP_OK));
     EXPECT_CALL(button_action_, init()).WillOnce(Return(ESP_OK));
+
+    EXPECT_EQ(sut_->init(), ESP_OK);
+}
+
+TEST_F(PumpControllerTest, InitWiFiFailureStillAllowsPumpControllerInit)
+{
+    EXPECT_CALL(mock_wifi_, init(_)).WillOnce(Return(ESP_OK));
+    EXPECT_CALL(mock_wifi_, add_credentials(_, _)).WillOnce(Return(ESP_OK));
+    EXPECT_CALL(mock_wifi_, start(10000)).WillOnce(Return(ESP_OK));
+    EXPECT_CALL(mock_wifi_, connect(15000, 3, 1500)).WillOnce(Return(ESP_FAIL));
 
     EXPECT_EQ(sut_->init(), ESP_OK);
 }

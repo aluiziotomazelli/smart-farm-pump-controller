@@ -8,8 +8,6 @@ list(APPEND EXTRA_COMPONENT_DIRS
     "${PROJECT_ROOT}/components/smart-farm-common/host_test/common"
     "${PROJECT_ROOT}/components/espnow_manager"
     "${PROJECT_ROOT}/components/wifi_manager"
-    "${PROJECT_ROOT}/components/wifi_manager/include"
-    "${PROJECT_ROOT}/components/wifi_manager/include/interfaces"
     "${PROJECT_ROOT}/components/ui_inputs"
     "${PROJECT_ROOT}/components/idf_hals"
     "${PROJECT_ROOT}/components/time_manager"
