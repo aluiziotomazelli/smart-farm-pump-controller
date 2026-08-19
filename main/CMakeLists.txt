@@ -16,6 +16,7 @@ idf_component_register(
         "src/pump_controller.cpp"
         "src/ota_controller.cpp"
         "src/hal_led_strip.cpp"
+        "src/tank_strip_display.cpp"
     INCLUDE_DIRS
         "include"
         "include/interfaces"
