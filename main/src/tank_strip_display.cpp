@@ -216,19 +216,18 @@ void TankStripDisplay::render_auto_pattern()
 
 void TankStripDisplay::render_timeout(uint32_t active_leds)
 {
-    // Render base level in Cyan
+    bool is_on = (error_timer_ms_ % 1000) < 500;
+    uint32_t top_idx = (active_leds > 0) ? (active_leds - 1) : 0;
+
     for (uint32_t i = 0; i < active_leds; i++) {
-        render_pixel_hsv(i, HUE_CYAN, SAT_CYAN, VAL_CYAN);
+        if (is_on && i == top_idx) {
+            render_pixel_hsv(i, HUE_ORANGE, SAT_FULL, VAL_FULL);
+        } else {
+            render_pixel_hsv(i, HUE_CYAN, SAT_CYAN, VAL_CYAN);
+        }
     }
     for (uint32_t i = active_leds; i < config_.num_leds; i++) {
         render_pixel_hsv(i, 0, 0, 0);
-    }
-
-    // Top LED blinks in Orange at 1Hz (500ms ON / 500ms OFF)
-    bool is_on = (error_timer_ms_ % 1000) < 500;
-    if (is_on && config_.num_leds > 0) {
-        uint32_t top_idx = (active_leds > 0) ? (active_leds - 1) : 0;
-        render_pixel_hsv(top_idx, HUE_ORANGE, SAT_FULL, VAL_FULL);
     }
 }
 
@@ -345,8 +344,8 @@ void TankStripDisplay::render_ota()
 void TankStripDisplay::render_boot_success()
 {
     // Progressive green sweep (50ms per LED)
-    if (boot_timer_ms_ >= 50) {
-        boot_timer_ms_ = 0;
+    while (boot_timer_ms_ >= 50) {
+        boot_timer_ms_ -= 50;
         if (boot_sweep_idx_ < config_.num_leds) {
             boot_sweep_idx_++;
         } else {
@@ -354,6 +353,7 @@ void TankStripDisplay::render_boot_success()
             if (boot_hold_ms_ >= 500) {
                 // Return to normal automatic rendering after sweep holds 500ms
                 override_pattern_ = TankStripPattern::AUTO;
+                break;
             }
         }
     }

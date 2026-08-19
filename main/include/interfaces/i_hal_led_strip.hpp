@@ -4,8 +4,28 @@
 #include <cstdint>
 
 #include "esp_err.h"
+
+#if !defined(CONFIG_IDF_TARGET_LINUX) && __has_include("led_strip.h")
 #include "led_strip.h"
 #include "led_strip_rmt.h"
+#else
+#include "led_strip_types.h"
+#include "driver/rmt_types.h"
+
+#ifndef RMT_CLK_SRC_DEFAULT
+#define RMT_CLK_SRC_DEFAULT static_cast<rmt_clock_source_t>(0)
+#endif
+
+typedef struct {
+    rmt_clock_source_t clk_src;
+    uint32_t resolution_hz;
+    size_t mem_block_symbols;
+    struct {
+        uint32_t with_dma: 1;
+    } flags;
+} led_strip_rmt_config_t;
+
+#endif
 
 /**
  * @interface IHalLedStrip
