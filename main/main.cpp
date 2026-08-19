@@ -13,6 +13,7 @@
 #include "hal_system.hpp"
 #include "hal_system_time.hpp"
 #include "hal_sntp.hpp"
+#include "hal_led_strip.hpp"
 
 #include "farm_protocol_types.hpp"
 #include "persistence_backend.hpp"
@@ -22,11 +23,9 @@
 #include "espnow_manager.hpp"
 #include "wifi_manager.hpp"
 #include "time_manager.hpp"
-#include "led_controller.hpp"
 #include "contactor_controller.hpp"
-#include "pump_led_controller.hpp"
+#include "tank_strip_display.hpp"
 #include "null_output_monitor.hpp"
-#include "null_tank_level_display.hpp"
 #include "pump_state_machine.hpp"
 #include "pump_command_handler.hpp"
 #include "pump_status_reporter.hpp"
@@ -47,14 +46,13 @@
 static const char* TAG = "main";
 
 // Pinout mapping for Seeed Studio XIAO ESP32-C3
-static constexpr gpio_num_t PIN_BUTTON_ACTION  = GPIO_NUM_2;  // D0
-static constexpr gpio_num_t PIN_SWITCH_MODE    = GPIO_NUM_3;  // D1
-static constexpr gpio_num_t PIN_SWITCH_SOURCE  = GPIO_NUM_4;  // D2
-static constexpr gpio_num_t PIN_CONTACTOR_GRID = GPIO_NUM_5;  // D3
-static constexpr gpio_num_t PIN_CONTACTOR_SOLAR= GPIO_NUM_6;  // D4
-static constexpr gpio_num_t PIN_LED_GRID       = GPIO_NUM_21; // D6
-static constexpr gpio_num_t PIN_LED_SOLAR      = GPIO_NUM_20; // D7
-static constexpr gpio_num_t PIN_BUTTON_BOOT_OTA= GPIO_NUM_9;  // D9 (Onboard BOOT)
+static constexpr gpio_num_t PIN_BUTTON_ACTION   = GPIO_NUM_2; // D0
+static constexpr gpio_num_t PIN_SWITCH_MODE     = GPIO_NUM_3; // D1
+static constexpr gpio_num_t PIN_SWITCH_SOURCE   = GPIO_NUM_4; // D2
+static constexpr gpio_num_t PIN_CONTACTOR_GRID  = GPIO_NUM_5; // D3
+static constexpr gpio_num_t PIN_CONTACTOR_SOLAR = GPIO_NUM_6; // D4
+static constexpr gpio_num_t PIN_LED_STRIP_DATA  = GPIO_NUM_7; // D5 (Addressable WS2812 strip DIN)
+static constexpr gpio_num_t PIN_BUTTON_BOOT_OTA = GPIO_NUM_9; // D9 (Onboard BOOT button)
 
 static constexpr const char* CORE_NVS_KEY = "core";
 static constexpr const char* PUMP_STATS_NVS_KEY = "pump_stats";
@@ -68,6 +66,7 @@ static idf_hals::HalFreertos hal_freertos;
 static idf_hals::SystemHAL hal_system;
 static idf_hals::HalSystemTime hal_sys_time;
 static idf_hals::HalSntp hal_sntp;
+static HalLedStrip hal_led_strip;
 
 // Persistence: Core Storage
 static RTC_DATA_ATTR CoreStorage g_rtc_core;
@@ -93,24 +92,14 @@ static ContactorConfig contactor_config{
 static ContactorController contactor_ctrl{hal_gpio, hal_freertos, contactor_config};
 
 static NullOutputMonitor output_monitor;
-static NullTankLevelDisplay tank_display;
 
-// LED Controllers
-static LedConfig led_grid_config{
-    .gpio_num = PIN_LED_GRID,
-    .task_stack_size = 2048,
-    .task_priority = 1,
-    .active_level = 1};
-static LedController led_grid{hal_gpio, hal_freertos, led_grid_config};
-
-static LedConfig led_solar_config{
-    .gpio_num = PIN_LED_SOLAR,
-    .task_stack_size = 2048,
-    .task_priority = 1,
-    .active_level = 1};
-static LedController led_solar{hal_gpio, hal_freertos, led_solar_config};
-
-static PumpLedController pump_leds{led_grid, led_solar};
+// Addressable LED Strip Unified Display (Level + Pump & OTA status)
+static TankStripConfig strip_cfg{
+    .gpio_pin = PIN_LED_STRIP_DATA,
+    .num_leds = 10,
+    .default_brightness = 200,
+    .rmt_resolution_hz = 10 * 1000 * 1000};
+static TankStripDisplay tank_display{hal_led_strip, strip_cfg};
 
 // State Machine
 static PumpStateMachineConfig fsm_config{
@@ -193,7 +182,6 @@ extern "C" void app_main()
         state_machine,
         command_handler,
         status_reporter,
-        pump_leds,
         tank_display,
         switch_mode,
         switch_source,

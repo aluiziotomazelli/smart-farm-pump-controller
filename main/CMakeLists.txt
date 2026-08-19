@@ -12,7 +12,6 @@ idf_component_register(
         "src/pump_command_handler.cpp"
         "src/pump_status_reporter.cpp"
         "src/contactor_controller.cpp"
-        "src/pump_led_controller.cpp"
         "src/pump_controller.cpp"
         "src/ota_controller.cpp"
         "src/hal_led_strip.cpp"

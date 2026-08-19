@@ -6,8 +6,7 @@
 #include "interfaces/i_pump_controller.hpp"
 #include "interfaces/i_pump_state_machine.hpp"
 #include "interfaces/i_pump_status_reporter.hpp"
-#include "interfaces/i_pump_led_controller.hpp"
-#include "interfaces/i_tank_level_display.hpp"
+#include "interfaces/i_tank_strip_display.hpp"
 #include "interfaces/i_switch.hpp"
 #include "interfaces/i_button.hpp"
 #include "interfaces/i_hal_freertos.hpp"
@@ -24,7 +23,7 @@
 
 /**
  * @class PumpController
- * @brief Coordinates input sampling, command handling, state machine execution, telemetry reporting, and persistence.
+ * @brief Coordinates input sampling, command handling, state machine execution, visual display, and persistence.
  */
 class PumpController : public IPumpController, public IOtaTriggerListener
 {
@@ -35,8 +34,7 @@ public:
         IPumpStateMachine& state_machine,
         PumpCommandHandler& command_handler,
         IPumpStatusReporter& status_reporter,
-        IPumpLedController& led_controller,
-        ITankLevelDisplay& tank_display,
+        ITankStripDisplay& display,
         ui_inputs::ISwitch& switch_mode,
         ui_inputs::ISwitch& switch_source,
         ui_inputs::IButton& button_action,
@@ -84,8 +82,7 @@ private:
     IPumpStateMachine& state_machine_;
     PumpCommandHandler& command_handler_;
     IPumpStatusReporter& status_reporter_;
-    IPumpLedController& led_controller_;
-    ITankLevelDisplay& tank_display_;
+    ITankStripDisplay& display_;
     ui_inputs::ISwitch& switch_mode_;
     ui_inputs::ISwitch& switch_source_;
     ui_inputs::IButton& button_action_;

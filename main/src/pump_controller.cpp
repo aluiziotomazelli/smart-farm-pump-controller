@@ -10,8 +10,7 @@
 #include "interfaces/i_pump_controller.hpp"
 #include "interfaces/i_pump_state_machine.hpp"
 #include "interfaces/i_pump_status_reporter.hpp"
-#include "interfaces/i_pump_led_controller.hpp"
-#include "interfaces/i_tank_level_display.hpp"
+#include "interfaces/i_tank_strip_display.hpp"
 #include "interfaces/i_switch.hpp"
 #include "interfaces/i_button.hpp"
 #include "interfaces/i_hal_freertos.hpp"
@@ -33,8 +32,7 @@ PumpController::PumpController(
     IPumpStateMachine& state_machine,
     PumpCommandHandler& command_handler,
     IPumpStatusReporter& status_reporter,
-    IPumpLedController& led_controller,
-    ITankLevelDisplay& tank_display,
+    ITankStripDisplay& display,
     ui_inputs::ISwitch& switch_mode,
     ui_inputs::ISwitch& switch_source,
     ui_inputs::IButton& button_action,
@@ -49,8 +47,7 @@ PumpController::PumpController(
     , state_machine_(state_machine)
     , command_handler_(command_handler)
     , status_reporter_(status_reporter)
-    , led_controller_(led_controller)
-    , tank_display_(tank_display)
+    , display_(display)
     , switch_mode_(switch_mode)
     , switch_source_(switch_source)
     , button_action_(button_action)
@@ -116,14 +113,7 @@ esp_err_t PumpController::init()
         return err;
     }
 
-    err = led_controller_.init();
-    if (err != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to init LED controller: %s", esp_err_to_name(err));
-        session_healthy = false;
-        return err;
-    }
-
-    err = tank_display_.init();
+    err = display_.init();
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "Failed to init tank display: %s", esp_err_to_name(err));
         session_healthy = false;
@@ -162,6 +152,9 @@ esp_err_t PumpController::init()
         return ESP_FAIL;
     }
 
+    // Trigger visual self-test sweep on every successful boot
+    display_.set_override_pattern(TankStripPattern::BOOT_SUCCESS);
+
     ESP_LOGI(
         TAG,
         "PumpController initialized successfully (Boot #%lu, Runtime: %lu s)",
@@ -172,12 +165,6 @@ esp_err_t PumpController::init()
 
 esp_err_t PumpController::start()
 {
-    esp_err_t err = led_controller_.start();
-    if (err != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to start LED controller: %s", esp_err_to_name(err));
-        return err;
-    }
-
     is_running_ = true;
     BaseType_t res = hal_rtos_.task_create(task_entry, "pump_ctrl_task", 4096, this, 5, &task_handle_);
 
@@ -199,7 +186,7 @@ void PumpController::stop()
         task_handle_ = nullptr;
     }
     btn_trigger_.disarm();
-    led_controller_.stop();
+    display_.clear();
     ESP_LOGI(TAG, "PumpController stopped");
 }
 
@@ -267,9 +254,10 @@ void PumpController::tick(uint32_t delta_ms)
     state_machine_.tick(delta_ms);
     status_reporter_.tick(delta_ms);
 
-    // 5. Update Visual Feedback & Runtime Accounting
+    // 5. Update Visual Feedback on Addressable Strip & Runtime Accounting
     auto snapshot = state_machine_.get_snapshot();
-    led_controller_.update(snapshot.state, snapshot.source);
+    display_.update_state(snapshot.state, mode, snapshot.source);
+    display_.tick(delta_ms);
 
     if (snapshot.state == farm::LoadState::RUNNING) {
         runtime_accumulator_ms_ += delta_ms;
@@ -427,8 +415,12 @@ bool PumpController::check_firmware_health(bool session_healthy)
         return true;
     }
 
+    display_.set_override_pattern(TankStripPattern::BOOT_ERROR);
     ESP_LOGE(TAG, "Post-boot OTA verification failed! Triggering rollback and reboot...");
-    hal_rtos_.task_delay(pdMS_TO_TICKS(500));
+    for (int i = 0; i < 15; i++) {
+        display_.tick(100);
+        hal_rtos_.task_delay(pdMS_TO_TICKS(100));
+    }
     ota_controller_.rollback_and_reboot();
     return false;
 }
@@ -444,8 +436,9 @@ void PumpController::process_pending_ota()
     // 1. Safety Interlock: Stop pump immediately before firmware flash
     state_machine_.handle_manual_stop();
 
-    // 2. Visual feedback
-    led_controller_.set_ota_updating();
+    // 2. Visual feedback on addressable strip
+    display_.set_override_pattern(TankStripPattern::OTA_UPDATING);
+    display_.tick(0);
 
     // 3. Connect to WiFi with sync retries
     ESP_LOGI(TAG, "Connecting to WiFi for OTA download (timeout: 15000 ms, max_retries: 3)...");
@@ -453,6 +446,7 @@ void PumpController::process_pending_ota()
     if (wifi_err != ESP_OK) {
         ESP_LOGE(TAG, "Failed to connect to WiFi for OTA (%s)", esp_err_to_name(wifi_err));
         send_ota_report(farm::OtaExecResult::DOWNLOAD_FAILED, farm::OtaErrorCode::WIFI_CONNECT_FAILED);
+        display_.set_override_pattern(TankStripPattern::AUTO);
         btn_trigger_.arm(*this);
         return;
     }
@@ -472,6 +466,7 @@ void PumpController::process_pending_ota()
     else {
         ESP_LOGE(TAG, "OTA download failed (error_code: %d)", static_cast<int>(result.error_code));
         send_ota_report(result.exec_result, result.error_code);
+        display_.set_override_pattern(TankStripPattern::AUTO);
         wifi_manager_.disconnect(2000);
         btn_trigger_.arm(*this);
     }

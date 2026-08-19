@@ -6,8 +6,7 @@
 #include "pump_controller.hpp"
 #include "mock_pump_state_machine.hpp"
 #include "mock_pump_status_reporter.hpp"
-#include "mock_pump_led_controller.hpp"
-#include "mock_tank_level_display.hpp"
+#include "mock_tank_strip_display.hpp"
 #include "mock_switch.hpp"
 #include "mock_button.hpp"
 #include "mock_espnow_manager.hpp"
@@ -36,9 +35,8 @@ protected:
     NiceMock<MockPumpStateMachine> state_machine_;
     NiceMock<espnow::MockEspNowManager> espnow_;
     NiceMock<time_manager::MockTimeManager> time_manager_;
-    NiceMock<MockTankLevelDisplay> tank_display_;
+    NiceMock<MockTankStripDisplay> display_;
     NiceMock<MockPumpStatusReporter> status_reporter_;
-    NiceMock<MockPumpLedController> led_controller_;
     NiceMock<ui_inputs::MockSwitch> switch_mode_;
     NiceMock<ui_inputs::MockSwitch> switch_source_;
     NiceMock<ui_inputs::MockButton> button_action_;
@@ -75,9 +73,7 @@ protected:
 
         ON_CALL(state_machine_, init()).WillByDefault(Return(ESP_OK));
         ON_CALL(status_reporter_, init()).WillByDefault(Return(ESP_OK));
-        ON_CALL(led_controller_, init()).WillByDefault(Return(ESP_OK));
-        ON_CALL(led_controller_, start()).WillByDefault(Return(ESP_OK));
-        ON_CALL(tank_display_, init()).WillByDefault(Return(ESP_OK));
+        ON_CALL(display_, init()).WillByDefault(Return(ESP_OK));
         ON_CALL(switch_mode_, init()).WillByDefault(Return(ESP_OK));
         ON_CALL(switch_source_, init()).WillByDefault(Return(ESP_OK));
         ON_CALL(button_action_, init()).WillByDefault(Return(ESP_OK));
@@ -98,7 +94,7 @@ protected:
             espnow_,
             state_machine_,
             time_manager_,
-            tank_display_,
+            display_,
             hal_rtos_);
 
         sut_ = std::make_unique<PumpController>(
@@ -107,8 +103,7 @@ protected:
             state_machine_,
             *command_handler_,
             status_reporter_,
-            led_controller_,
-            tank_display_,
+            display_,
             switch_mode_,
             switch_source_,
             button_action_,
@@ -133,11 +128,11 @@ TEST_F(PumpControllerTest, InitInitializesAllSubsystemsAndStorage)
     EXPECT_CALL(btn_trigger_, arm(_)).WillOnce(Return(ESP_OK));
     EXPECT_CALL(state_machine_, init()).WillOnce(Return(ESP_OK));
     EXPECT_CALL(status_reporter_, init()).WillOnce(Return(ESP_OK));
-    EXPECT_CALL(led_controller_, init()).WillOnce(Return(ESP_OK));
-    EXPECT_CALL(tank_display_, init()).WillOnce(Return(ESP_OK));
+    EXPECT_CALL(display_, init()).WillOnce(Return(ESP_OK));
     EXPECT_CALL(switch_mode_, init()).WillOnce(Return(ESP_OK));
     EXPECT_CALL(switch_source_, init()).WillOnce(Return(ESP_OK));
     EXPECT_CALL(button_action_, init()).WillOnce(Return(ESP_OK));
+    EXPECT_CALL(display_, set_override_pattern(TankStripPattern::BOOT_SUCCESS)).Times(1);
 
     EXPECT_EQ(sut_->init(), ESP_OK);
 }
@@ -150,6 +145,7 @@ TEST_F(PumpControllerTest, InitPendingVerifyConfirmsFirmwareSuccessfully)
     EXPECT_CALL(espnow_, send_data(espnow::ReservedIds::HUB, static_cast<uint8_t>(farm::PayloadType::OTA_STATUS_REPORT), _, _, true))
         .WillOnce(Return(ESP_OK));
     EXPECT_CALL(nvs_core_, save_core(_, true)).WillOnce(Return(ESP_OK));
+    EXPECT_CALL(display_, set_override_pattern(TankStripPattern::BOOT_SUCCESS)).Times(1);
 
     EXPECT_EQ(sut_->init(), ESP_OK);
 }
@@ -161,14 +157,16 @@ TEST_F(PumpControllerTest, InitPendingVerifyRollbackTriggersReboot)
     EXPECT_CALL(mock_ota_, confirm_firmware(true)).WillOnce(Return(fail_res));
     EXPECT_CALL(espnow_, send_data(espnow::ReservedIds::HUB, static_cast<uint8_t>(farm::PayloadType::OTA_STATUS_REPORT), _, _, true))
         .WillOnce(Return(ESP_OK));
+    EXPECT_CALL(display_, set_override_pattern(TankStripPattern::BOOT_ERROR)).Times(1);
+    EXPECT_CALL(display_, tick(100)).Times(15);
+    EXPECT_CALL(hal_rtos_, task_delay(_)).Times(::testing::AtLeast(15));
     EXPECT_CALL(mock_ota_, rollback_and_reboot()).Times(1);
 
     EXPECT_EQ(sut_->init(), ESP_FAIL);
 }
 
-TEST_F(PumpControllerTest, StartLaunchesTaskAndLedController)
+TEST_F(PumpControllerTest, StartLaunchesTask)
 {
-    EXPECT_CALL(led_controller_, start()).WillOnce(Return(ESP_OK));
     EXPECT_CALL(hal_rtos_, task_create(_, ::testing::StrEq("pump_ctrl_task"), 4096, _, 5, _))
         .WillOnce(Return(pdPASS));
 
@@ -184,7 +182,8 @@ TEST_F(PumpControllerTest, TickSamplesSwitchModeAutoAndUpdatesStateMachine)
 
     EXPECT_CALL(state_machine_, tick(50)).Times(1);
     EXPECT_CALL(status_reporter_, tick(50)).Times(1);
-    EXPECT_CALL(led_controller_, update(farm::LoadState::IDLE, farm::PowerSource::UNKNOWN)).Times(1);
+    EXPECT_CALL(display_, update_state(farm::LoadState::IDLE, farm::ControlMode::AUTO, farm::PowerSource::UNKNOWN)).Times(1);
+    EXPECT_CALL(display_, tick(50)).Times(1);
 
     sut_->tick(50);
 }
@@ -277,7 +276,7 @@ TEST_F(PumpControllerTest, TickHandlesOtaCommandStopsPumpConnectsWiFiAndRestarts
 
     EXPECT_CALL(btn_trigger_, disarm()).Times(::testing::AtLeast(1));
     EXPECT_CALL(state_machine_, handle_manual_stop()).Times(1);
-    EXPECT_CALL(led_controller_, set_ota_updating()).Times(1);
+    EXPECT_CALL(display_, set_override_pattern(TankStripPattern::OTA_UPDATING)).Times(1);
     EXPECT_CALL(mock_wifi_, connect(15000, 3, 1500)).WillOnce(Return(ESP_OK));
 
     OtaActionResult download_ok{.success = true, .exec_result = farm::OtaExecResult::CONFIRMED_SUCCESS, .error_code = farm::OtaErrorCode::NONE};
@@ -299,7 +298,7 @@ TEST_F(PumpControllerTest, ButtonOtaTriggerInvokesOtaFlowOnTick)
 
     EXPECT_CALL(btn_trigger_, disarm()).Times(::testing::AtLeast(1));
     EXPECT_CALL(state_machine_, handle_manual_stop()).Times(1);
-    EXPECT_CALL(led_controller_, set_ota_updating()).Times(1);
+    EXPECT_CALL(display_, set_override_pattern(TankStripPattern::OTA_UPDATING)).Times(1);
     EXPECT_CALL(mock_wifi_, connect(15000, 3, 1500)).WillOnce(Return(ESP_OK));
 
     OtaActionResult download_ok{.success = true, .exec_result = farm::OtaExecResult::CONFIRMED_SUCCESS, .error_code = farm::OtaErrorCode::NONE};
@@ -330,11 +329,12 @@ TEST_F(PumpControllerTest, TickHandlesOtaCommandWiFiFailureSendsReportAndRearmsT
 
     EXPECT_CALL(btn_trigger_, disarm()).Times(::testing::AtLeast(1));
     EXPECT_CALL(state_machine_, handle_manual_stop()).Times(1);
-    EXPECT_CALL(led_controller_, set_ota_updating()).Times(1);
+    EXPECT_CALL(display_, set_override_pattern(TankStripPattern::OTA_UPDATING)).Times(1);
     EXPECT_CALL(mock_wifi_, connect(15000, 3, 1500)).WillOnce(Return(ESP_FAIL));
 
     EXPECT_CALL(espnow_, send_data(espnow::ReservedIds::HUB, static_cast<uint8_t>(farm::PayloadType::OTA_STATUS_REPORT), _, _, true))
         .WillOnce(Return(ESP_OK));
+    EXPECT_CALL(display_, set_override_pattern(TankStripPattern::AUTO)).Times(1);
     EXPECT_CALL(btn_trigger_, arm(_)).WillOnce(Return(ESP_OK));
 
     sut_->tick(50);

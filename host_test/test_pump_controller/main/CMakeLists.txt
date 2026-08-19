@@ -27,6 +27,7 @@ idf_component_register(
         "../../../components/idf_hals/include"
         "../../../components/idf_hals/include/interfaces"
         "../../../components/idf_hals/mocks"
+        "../../../managed_components/espressif__led_strip/include"
     REQUIRES 
         gtest
         smart-farm-common
