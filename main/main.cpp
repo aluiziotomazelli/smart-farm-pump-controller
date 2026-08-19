@@ -34,6 +34,16 @@
 #include "button.hpp"
 #include "switch.hpp"
 
+#include "http_client.hpp"
+#include "manifest_parser.hpp"
+#include "ota_session.hpp"
+#include "system.hpp"
+#include "task_scheduler.hpp"
+#include "rollback_manager.hpp"
+#include "ota_manager.hpp"
+#include "ota_controller.hpp"
+#include "button_ota_trigger.hpp"
+
 static const char* TAG = "main";
 
 // Pinout mapping for Seeed Studio XIAO ESP32-C3
@@ -135,6 +145,27 @@ static ui_inputs::ButtonConfig button_cfg{
     .enable_internal_pull = true};
 static ui_inputs::Button button_action{hal_gpio, hal_timer, PIN_BUTTON_ACTION, true, button_cfg};
 
+// OTA Manager & Controller
+static HttpClient http_client;
+static ManifestParser manifest_parser;
+static OtaSession ota_session;
+static System ota_system;
+static TaskScheduler task_scheduler;
+static RollbackManager rollback_manager;
+static OtaDependencies ota_deps = {
+    .http_client = http_client,
+    .manifest_parser = manifest_parser,
+    .ota_session = ota_session,
+    .system = ota_system,
+    .task_scheduler = task_scheduler,
+    .rollback_manager = rollback_manager,
+};
+static OtaManager ota_manager(ota_deps);
+static OtaController ota_controller(ota_manager, hal_freertos);
+
+// Hardware Boot Button OTA Trigger (3000 ms long press)
+static ButtonOtaTrigger btn_trigger(hal_gpio, hal_freertos, PIN_BUTTON_BOOT_OTA, 3000);
+
 extern "C" void app_main()
 {
     ESP_LOGI(TAG, "Starting Smart Farm Pump Controller...");
@@ -168,6 +199,9 @@ extern "C" void app_main()
         switch_source,
         button_action,
         wifi,
+        ota_controller,
+        btn_trigger,
+        espnow,
         hal_freertos,
         hal_system};
 

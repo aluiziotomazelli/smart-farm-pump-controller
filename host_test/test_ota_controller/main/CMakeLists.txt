@@ -1,9 +1,8 @@
 idf_component_register(
     SRCS 
         "main.cpp"
-        "test_pump_controller.cpp"
-        "../../../main/src/pump_controller.cpp"
-        "../../../main/src/pump_command_handler.cpp"
+        "test_ota_controller.cpp"
+        "../../../main/src/ota_controller.cpp"
     INCLUDE_DIRS 
         "."
         "../../mocks"
@@ -13,28 +12,16 @@ idf_component_register(
         "../../../components/smart-farm-common/include"
         "../../../components/smart-farm-common/include/interfaces"
         "../../../components/smart-farm-common/host_test/common"
-        "../../../components/espnow_manager/include"
-        "../../../components/espnow_manager/include/interfaces"
-        "../../../components/wifi_manager"
-        "../../../components/time_manager/include"
-        "../../../components/time_manager/include/interfaces"
-        "../../../components/time_manager/host_test/mocks"
         "../../../components/ota_manager/include"
         "../../../components/ota_manager/include/interfaces"
         "../../../components/ota_manager/host_test/mocks"
-        "../../../components/ui_inputs/include"
-        "../../../components/ui_inputs/include/interfaces"
         "../../../components/idf_hals/include"
         "../../../components/idf_hals/include/interfaces"
         "../../../components/idf_hals/mocks"
     REQUIRES 
         gtest
         smart-farm-common
-        espnow_manager
-        wifi_manager
         ota_manager
-        time_manager
-        ui_inputs
         idf_hals
         WHOLE_ARCHIVE
 )

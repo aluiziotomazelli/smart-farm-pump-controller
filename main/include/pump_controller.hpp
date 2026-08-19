@@ -15,6 +15,9 @@
 #include "interfaces/i_nvs_core.hpp"
 #include "interfaces/i_pump_nvs.hpp"
 #include "interfaces/i_wifi_manager.hpp"
+#include "interfaces/i_ota_controller.hpp"
+#include "interfaces/i_ota_trigger.hpp"
+#include "interfaces/i_espnow_manager.hpp"
 #include "pump_command_handler.hpp"
 #include "pump_stats.hpp"
 #include "core_types.hpp"
@@ -23,7 +26,7 @@
  * @class PumpController
  * @brief Coordinates input sampling, command handling, state machine execution, telemetry reporting, and persistence.
  */
-class PumpController : public IPumpController
+class PumpController : public IPumpController, public IOtaTriggerListener
 {
 public:
     PumpController(
@@ -38,6 +41,9 @@ public:
         ui_inputs::ISwitch& switch_source,
         ui_inputs::IButton& button_action,
         wifi_manager::IWiFiManager& wifi_manager,
+        IOtaController& ota_controller,
+        IOtaTrigger& btn_trigger,
+        espnow::IEspNowManager& espnow,
         idf_hals::IHalFreertos& hal_rtos,
         idf_hals::ISystemHAL& hal_system);
 
@@ -54,6 +60,9 @@ public:
 
     /** @copydoc IPumpController::tick */
     void tick(uint32_t delta_ms) override;
+
+    /** @copydoc IOtaTriggerListener::on_ota_triggered */
+    void on_ota_triggered(OtaTriggerSource source) override;
 
     /**
      * @brief Persists dirty or pending storage states to NVS flash.
@@ -81,6 +90,9 @@ private:
     ui_inputs::ISwitch& switch_source_;
     ui_inputs::IButton& button_action_;
     wifi_manager::IWiFiManager& wifi_manager_;
+    IOtaController& ota_controller_;
+    IOtaTrigger& btn_trigger_;
+    espnow::IEspNowManager& espnow_;
     idf_hals::IHalFreertos& hal_rtos_;
     idf_hals::ISystemHAL& hal_system_;
 
@@ -88,6 +100,7 @@ private:
     PumpStats stats_{};
     bool pending_core_commit_{false};
     bool pending_controller_commit_{false};
+    bool ota_triggered_{false};
 
     uint32_t runtime_accumulator_ms_{0};
     uint32_t nvs_commit_accumulator_ms_{0};
@@ -98,6 +111,12 @@ private:
     esp_err_t init_core_storage();
     esp_err_t init_pump_storage();
     esp_err_t init_wifi();
+    esp_err_t init_ota();
+    void update_running_version();
+    bool check_firmware_health(bool session_healthy);
+
+    void process_pending_ota();
+    esp_err_t send_ota_report(farm::OtaExecResult result, farm::OtaErrorCode error_code);
 
     static void task_entry(void* arg);
     void run_task();

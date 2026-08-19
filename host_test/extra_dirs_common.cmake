@@ -12,6 +12,8 @@ list(APPEND EXTRA_COMPONENT_DIRS
     "${PROJECT_ROOT}/components/idf_hals"
     "${PROJECT_ROOT}/components/time_manager"
     "${PROJECT_ROOT}/components/time_manager/host_test/mocks"
+    "${PROJECT_ROOT}/components/ota_manager"
+    "${PROJECT_ROOT}/components/ota_manager/host_test/mocks"
     "${PROJECT_ROOT}/host_test/mocks"
     "${PROJECT_ROOT}/host_test/gtest"
 
@@ -27,6 +29,7 @@ set(COMPONENTS
     "smart-farm-common"
     "espnow_manager"
     "wifi_manager"
+    "ota_manager"
     "ui_inputs"
     "time_manager"
     "idf_hals"

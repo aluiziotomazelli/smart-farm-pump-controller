@@ -19,6 +19,9 @@
 #include "interfaces/i_nvs_core.hpp"
 #include "interfaces/i_pump_nvs.hpp"
 #include "interfaces/i_wifi_manager.hpp"
+#include "interfaces/i_ota_controller.hpp"
+#include "interfaces/i_ota_trigger.hpp"
+#include "interfaces/i_espnow_manager.hpp"
 #include "pump_command_handler.hpp"
 #include "secrets.hpp"
 
@@ -36,6 +39,9 @@ PumpController::PumpController(
     ui_inputs::ISwitch& switch_source,
     ui_inputs::IButton& button_action,
     wifi_manager::IWiFiManager& wifi_manager,
+    IOtaController& ota_controller,
+    IOtaTrigger& btn_trigger,
+    espnow::IEspNowManager& espnow,
     idf_hals::IHalFreertos& hal_rtos,
     idf_hals::ISystemHAL& hal_system)
     : core_storage_(core_storage)
@@ -49,6 +55,9 @@ PumpController::PumpController(
     , switch_source_(switch_source)
     , button_action_(button_action)
     , wifi_manager_(wifi_manager)
+    , ota_controller_(ota_controller)
+    , btn_trigger_(btn_trigger)
+    , espnow_(espnow)
     , hal_rtos_(hal_rtos)
     , hal_system_(hal_system)
 {
@@ -61,22 +70,38 @@ PumpController::~PumpController()
 
 esp_err_t PumpController::init()
 {
+    bool session_healthy = true;
+
     esp_err_t err = init_core_storage();
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "Failed to init core storage: %s", esp_err_to_name(err));
+        session_healthy = false;
         return err;
     }
 
     err = init_pump_storage();
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "Failed to init pump storage: %s", esp_err_to_name(err));
+        session_healthy = false;
         return err;
     }
 
     err = init_wifi();
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "Failed to init WiFi: %s", esp_err_to_name(err));
-        return err;
+        session_healthy = false;
+    }
+
+    err = init_ota();
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to init OTA: %s", esp_err_to_name(err));
+        session_healthy = false;
+    }
+
+    update_running_version();
+
+    if (!check_firmware_health(session_healthy)) {
+        return ESP_FAIL;
     }
 
     command_handler_.set_core_data(core_);
@@ -123,6 +148,11 @@ esp_err_t PumpController::init()
         return err;
     }
 
+    err = btn_trigger_.arm(*this);
+    if (err != ESP_OK) {
+        ESP_LOGW(TAG, "Failed to arm Boot Button OTA trigger: %s", esp_err_to_name(err));
+    }
+
     ESP_LOGI(
         TAG,
         "PumpController initialized successfully (Boot #%lu, Runtime: %lu s)",
@@ -159,8 +189,15 @@ void PumpController::stop()
         hal_rtos_.task_delete(task_handle_);
         task_handle_ = nullptr;
     }
+    btn_trigger_.disarm();
     led_controller_.stop();
     ESP_LOGI(TAG, "PumpController stopped");
+}
+
+void PumpController::on_ota_triggered(OtaTriggerSource source)
+{
+    ESP_LOGI(TAG, "OTA triggered from source: %d", static_cast<int>(source));
+    ota_triggered_ = true;
 }
 
 void PumpController::tick(uint32_t delta_ms)
@@ -209,6 +246,11 @@ void PumpController::tick(uint32_t delta_ms)
         state_machine_.handle_manual_stop();
         hal_rtos_.task_delay(pdMS_TO_TICKS(100));
         hal_system_.restart();
+        return;
+    }
+
+    if (cmd_res.ota_requested || ota_triggered_) {
+        process_pending_ota();
         return;
     }
 
@@ -323,6 +365,134 @@ esp_err_t PumpController::init_wifi()
 
     ESP_LOGI(TAG, "WiFi initialized and started (ESP-NOW ready, connection on-demand for OTA)");
     return ESP_OK;
+}
+
+esp_err_t PumpController::init_ota()
+{
+    OtaConfig ota_cfg{};
+    ota_cfg.device_type = "pump_controller";
+    ota_cfg.manifest_url = SERVER_URL;
+    ota_cfg.task_stack_size = 8192;
+    ota_cfg.task_priority = 5;
+    ota_cfg.transport.manifest_timeout_ms = 10000;
+    ota_cfg.transport.firmware_timeout_ms = 30000;
+    ota_cfg.security.allow_http_during_development = true;
+    ota_cfg.allow_same_version = true;
+    ota_cfg.restart_on_success = false;
+
+    if (!ota_controller_.init(ota_cfg)) {
+        ESP_LOGE(TAG, "Failed to initialize OtaController");
+        return ESP_FAIL;
+    }
+    return ESP_OK;
+}
+
+void PumpController::update_running_version()
+{
+    auto current_version = ota_controller_.get_running_version();
+    if (current_version.has_value()) {
+        if (core_.fw_major != current_version->major || core_.fw_minor != current_version->minor ||
+            core_.fw_patch != current_version->patch) {
+            core_.fw_major = current_version->major;
+            core_.fw_minor = current_version->minor;
+            core_.fw_patch = current_version->patch;
+            pending_core_commit_ = true;
+        }
+    }
+    ESP_LOGI(TAG, "Running firmware version: %u.%u.%u", core_.fw_major, core_.fw_minor, core_.fw_patch);
+}
+
+bool PumpController::check_firmware_health(bool session_healthy)
+{
+    if (!ota_controller_.check_pending_verify()) {
+        return true;
+    }
+
+    ESP_LOGI(TAG, "Pending OTA verification detected on boot; confirming firmware...");
+    OtaActionResult result = ota_controller_.confirm_firmware(session_healthy);
+    send_ota_report(result.exec_result, result.error_code);
+
+    if (result.success) {
+        pending_core_commit_ = true;
+        save_persistent_state(true);
+        return true;
+    }
+
+    ESP_LOGE(TAG, "Post-boot OTA verification failed! Triggering rollback and reboot...");
+    hal_rtos_.task_delay(pdMS_TO_TICKS(500));
+    ota_controller_.rollback_and_reboot();
+    return false;
+}
+
+void PumpController::process_pending_ota()
+{
+    ota_triggered_ = false;
+    ESP_LOGI(TAG, "Processing pending OTA update...");
+
+    // Disarm trigger while executing OTA
+    btn_trigger_.disarm();
+
+    // 1. Safety Interlock: Stop pump immediately before firmware flash
+    state_machine_.handle_manual_stop();
+
+    // 2. Visual feedback
+    led_controller_.set_ota_updating();
+
+    // 3. Connect to WiFi with sync retries
+    ESP_LOGI(TAG, "Connecting to WiFi for OTA download (timeout: 15000 ms, max_retries: 3)...");
+    esp_err_t wifi_err = wifi_manager_.connect(15000, 3, 1500);
+    if (wifi_err != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to connect to WiFi for OTA (%s)", esp_err_to_name(wifi_err));
+        send_ota_report(farm::OtaExecResult::DOWNLOAD_FAILED, farm::OtaErrorCode::WIFI_CONNECT_FAILED);
+        btn_trigger_.arm(*this);
+        return;
+    }
+
+    // 4. Execute OTA download
+    OtaActionResult result = ota_controller_.execute_download();
+    if (result.success) {
+        ESP_LOGI(TAG, "OTA download succeeded! Persisting state and restarting...");
+        pending_core_commit_ = true;
+        pending_controller_commit_ = true;
+        save_persistent_state(true);
+        wifi_manager_.disconnect(2000);
+        wifi_manager_.stop(2000);
+        hal_system_.restart();
+        return;
+    }
+    else {
+        ESP_LOGE(TAG, "OTA download failed (error_code: %d)", static_cast<int>(result.error_code));
+        send_ota_report(result.exec_result, result.error_code);
+        wifi_manager_.disconnect(2000);
+        btn_trigger_.arm(*this);
+    }
+}
+
+esp_err_t PumpController::send_ota_report(farm::OtaExecResult result, farm::OtaErrorCode error_code)
+{
+    farm::OtaStatusReport report{};
+    report.power_profile = core_.power_profile;
+    report.result = result;
+    report.error_code = error_code;
+    report.fw_major = core_.fw_major;
+    report.fw_minor = core_.fw_minor;
+    report.fw_patch = core_.fw_patch;
+
+    ESP_LOGI(
+        TAG,
+        "Sending OTA status report to Hub: result=%u, error_code=%u (FW v%u.%u.%u)",
+        static_cast<uint8_t>(result),
+        static_cast<uint8_t>(error_code),
+        core_.fw_major,
+        core_.fw_minor,
+        core_.fw_patch);
+
+    return espnow_.send_data(
+        espnow::ReservedIds::HUB,
+        static_cast<uint8_t>(farm::PayloadType::OTA_STATUS_REPORT),
+        &report,
+        sizeof(report),
+        true);
 }
 
 void PumpController::task_entry(void* arg)

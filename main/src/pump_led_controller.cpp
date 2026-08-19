@@ -108,3 +108,10 @@ void PumpLedController::update(farm::LoadState state, farm::PowerSource source)
         break;
     }
 }
+
+void PumpLedController::set_ota_updating()
+{
+    led_grid_.set_pattern(BlinkPattern::OTA_UPDATING);
+    led_solar_.set_pattern(BlinkPattern::OTA_UPDATING);
+}
+

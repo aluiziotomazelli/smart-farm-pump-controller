@@ -21,3 +21,7 @@
 [submodule "components/wifi_manager"]
 	path = components/wifi_manager
 	url = https://github.com/aluiziotomazelli/wifi_manager
+[submodule "components/ota_manager"]
+	path = components/ota_manager
+	url = https://github.com/aluiziotomazelli/ota_manager
+	branch = main

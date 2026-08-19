@@ -17,6 +17,8 @@
 #include "mock_nvs_core.hpp"
 #include "mock_pump_nvs.hpp"
 #include "mock_i_wifi_manager.hpp"
+#include "mock_i_ota_controller.hpp"
+#include "mock_i_ota_trigger.hpp"
 
 #include "secrets.hpp"
 
@@ -41,6 +43,8 @@ protected:
     NiceMock<ui_inputs::MockSwitch> switch_source_;
     NiceMock<ui_inputs::MockButton> button_action_;
     NiceMock<wifi_manager::MockWiFiManager> mock_wifi_;
+    NiceMock<MockOtaController> mock_ota_;
+    NiceMock<MockOtaTrigger> btn_trigger_;
     NiceMock<idf_hals::MockHalFreertos> hal_rtos_;
     NiceMock<idf_hals::MockSystemHAL> hal_system_;
 
@@ -60,6 +64,14 @@ protected:
         ON_CALL(mock_wifi_, add_credentials(_, _)).WillByDefault(Return(ESP_OK));
         ON_CALL(mock_wifi_, start(_)).WillByDefault(Return(ESP_OK));
         ON_CALL(mock_wifi_, connect(_, _, _)).WillByDefault(Return(ESP_OK));
+        ON_CALL(mock_wifi_, disconnect(_)).WillByDefault(Return(ESP_OK));
+        ON_CALL(mock_wifi_, stop(_)).WillByDefault(Return(ESP_OK));
+
+        ON_CALL(mock_ota_, init(_)).WillByDefault(Return(true));
+        ON_CALL(mock_ota_, check_pending_verify()).WillByDefault(Return(false));
+        ON_CALL(mock_ota_, get_running_version()).WillByDefault(Return(OtaVersion{1, 0, 0}));
+
+        ON_CALL(btn_trigger_, arm(_)).WillByDefault(Return(ESP_OK));
 
         ON_CALL(state_machine_, init()).WillByDefault(Return(ESP_OK));
         ON_CALL(status_reporter_, init()).WillByDefault(Return(ESP_OK));
@@ -101,6 +113,9 @@ protected:
             switch_source_,
             button_action_,
             mock_wifi_,
+            mock_ota_,
+            btn_trigger_,
+            espnow_,
             hal_rtos_,
             hal_system_);
     }
@@ -114,6 +129,8 @@ TEST_F(PumpControllerTest, InitInitializesAllSubsystemsAndStorage)
     EXPECT_CALL(mock_wifi_, add_credentials(::testing::StrEq(WIFI_SSID), ::testing::StrEq(WIFI_PASS)))
         .WillOnce(Return(ESP_OK));
     EXPECT_CALL(mock_wifi_, start(10000)).WillOnce(Return(ESP_OK));
+    EXPECT_CALL(mock_ota_, init(_)).WillOnce(Return(true));
+    EXPECT_CALL(btn_trigger_, arm(_)).WillOnce(Return(ESP_OK));
     EXPECT_CALL(state_machine_, init()).WillOnce(Return(ESP_OK));
     EXPECT_CALL(status_reporter_, init()).WillOnce(Return(ESP_OK));
     EXPECT_CALL(led_controller_, init()).WillOnce(Return(ESP_OK));
@@ -123,6 +140,30 @@ TEST_F(PumpControllerTest, InitInitializesAllSubsystemsAndStorage)
     EXPECT_CALL(button_action_, init()).WillOnce(Return(ESP_OK));
 
     EXPECT_EQ(sut_->init(), ESP_OK);
+}
+
+TEST_F(PumpControllerTest, InitPendingVerifyConfirmsFirmwareSuccessfully)
+{
+    EXPECT_CALL(mock_ota_, check_pending_verify()).WillOnce(Return(true));
+    OtaActionResult confirm_res{.success = true, .exec_result = farm::OtaExecResult::CONFIRMED_SUCCESS, .error_code = farm::OtaErrorCode::NONE};
+    EXPECT_CALL(mock_ota_, confirm_firmware(true)).WillOnce(Return(confirm_res));
+    EXPECT_CALL(espnow_, send_data(espnow::ReservedIds::HUB, static_cast<uint8_t>(farm::PayloadType::OTA_STATUS_REPORT), _, _, true))
+        .WillOnce(Return(ESP_OK));
+    EXPECT_CALL(nvs_core_, save_core(_, true)).WillOnce(Return(ESP_OK));
+
+    EXPECT_EQ(sut_->init(), ESP_OK);
+}
+
+TEST_F(PumpControllerTest, InitPendingVerifyRollbackTriggersReboot)
+{
+    EXPECT_CALL(mock_ota_, check_pending_verify()).WillOnce(Return(true));
+    OtaActionResult fail_res{.success = false, .exec_result = farm::OtaExecResult::ROLLBACK_TRIGGERED, .error_code = farm::OtaErrorCode::HEALTH_CHECK_FAILED};
+    EXPECT_CALL(mock_ota_, confirm_firmware(true)).WillOnce(Return(fail_res));
+    EXPECT_CALL(espnow_, send_data(espnow::ReservedIds::HUB, static_cast<uint8_t>(farm::PayloadType::OTA_STATUS_REPORT), _, _, true))
+        .WillOnce(Return(ESP_OK));
+    EXPECT_CALL(mock_ota_, rollback_and_reboot()).Times(1);
+
+    EXPECT_EQ(sut_->init(), ESP_FAIL);
 }
 
 TEST_F(PumpControllerTest, StartLaunchesTaskAndLedController)
@@ -216,6 +257,85 @@ TEST_F(PumpControllerTest, TickHandlesRebootCommandGracefullyAndPersistsState)
     EXPECT_CALL(pump_nvs_, save_app_data(_, true)).Times(1);
     EXPECT_CALL(state_machine_, handle_manual_stop()).Times(1);
     EXPECT_CALL(hal_system_, restart()).Times(1);
+
+    sut_->tick(50);
+}
+
+TEST_F(PumpControllerTest, TickHandlesOtaCommandStopsPumpConnectsWiFiAndRestartsOnSuccess)
+{
+    espnow::AppMessage ota_msg{};
+    ota_msg.msg_type = espnow::MessageType::COMMAND;
+    ota_msg.payload_type = static_cast<uint8_t>(espnow::CommandType::START_OTA);
+    ota_msg.requires_ack = false;
+
+    EXPECT_CALL(hal_rtos_, queue_receive(dummy_queue_, _, 0))
+        .WillOnce([ota_msg](QueueHandle_t, void* buf, TickType_t) {
+            std::memcpy(buf, &ota_msg, sizeof(ota_msg));
+            return pdTRUE;
+        })
+        .WillRepeatedly(Return(pdFALSE));
+
+    EXPECT_CALL(btn_trigger_, disarm()).Times(::testing::AtLeast(1));
+    EXPECT_CALL(state_machine_, handle_manual_stop()).Times(1);
+    EXPECT_CALL(led_controller_, set_ota_updating()).Times(1);
+    EXPECT_CALL(mock_wifi_, connect(15000, 3, 1500)).WillOnce(Return(ESP_OK));
+
+    OtaActionResult download_ok{.success = true, .exec_result = farm::OtaExecResult::CONFIRMED_SUCCESS, .error_code = farm::OtaErrorCode::NONE};
+    EXPECT_CALL(mock_ota_, execute_download(60000)).WillOnce(Return(download_ok));
+
+    EXPECT_CALL(nvs_core_, save_core(_, true)).Times(1);
+    EXPECT_CALL(pump_nvs_, save_app_data(_, true)).Times(1);
+    EXPECT_CALL(mock_wifi_, disconnect(2000)).WillOnce(Return(ESP_OK));
+    EXPECT_CALL(mock_wifi_, stop(2000)).WillOnce(Return(ESP_OK));
+    EXPECT_CALL(hal_system_, restart()).Times(1);
+
+    sut_->tick(50);
+}
+
+TEST_F(PumpControllerTest, ButtonOtaTriggerInvokesOtaFlowOnTick)
+{
+    // Trigger OTA via button callback
+    sut_->on_ota_triggered(OtaTriggerSource::BUTTON);
+
+    EXPECT_CALL(btn_trigger_, disarm()).Times(::testing::AtLeast(1));
+    EXPECT_CALL(state_machine_, handle_manual_stop()).Times(1);
+    EXPECT_CALL(led_controller_, set_ota_updating()).Times(1);
+    EXPECT_CALL(mock_wifi_, connect(15000, 3, 1500)).WillOnce(Return(ESP_OK));
+
+    OtaActionResult download_ok{.success = true, .exec_result = farm::OtaExecResult::CONFIRMED_SUCCESS, .error_code = farm::OtaErrorCode::NONE};
+    EXPECT_CALL(mock_ota_, execute_download(60000)).WillOnce(Return(download_ok));
+
+    EXPECT_CALL(nvs_core_, save_core(_, true)).Times(1);
+    EXPECT_CALL(pump_nvs_, save_app_data(_, true)).Times(1);
+    EXPECT_CALL(mock_wifi_, disconnect(2000)).WillOnce(Return(ESP_OK));
+    EXPECT_CALL(mock_wifi_, stop(2000)).WillOnce(Return(ESP_OK));
+    EXPECT_CALL(hal_system_, restart()).Times(1);
+
+    sut_->tick(50);
+}
+
+TEST_F(PumpControllerTest, TickHandlesOtaCommandWiFiFailureSendsReportAndRearmsTrigger)
+{
+    espnow::AppMessage ota_msg{};
+    ota_msg.msg_type = espnow::MessageType::COMMAND;
+    ota_msg.payload_type = static_cast<uint8_t>(espnow::CommandType::START_OTA);
+    ota_msg.requires_ack = false;
+
+    EXPECT_CALL(hal_rtos_, queue_receive(dummy_queue_, _, 0))
+        .WillOnce([ota_msg](QueueHandle_t, void* buf, TickType_t) {
+            std::memcpy(buf, &ota_msg, sizeof(ota_msg));
+            return pdTRUE;
+        })
+        .WillRepeatedly(Return(pdFALSE));
+
+    EXPECT_CALL(btn_trigger_, disarm()).Times(::testing::AtLeast(1));
+    EXPECT_CALL(state_machine_, handle_manual_stop()).Times(1);
+    EXPECT_CALL(led_controller_, set_ota_updating()).Times(1);
+    EXPECT_CALL(mock_wifi_, connect(15000, 3, 1500)).WillOnce(Return(ESP_FAIL));
+
+    EXPECT_CALL(espnow_, send_data(espnow::ReservedIds::HUB, static_cast<uint8_t>(farm::PayloadType::OTA_STATUS_REPORT), _, _, true))
+        .WillOnce(Return(ESP_OK));
+    EXPECT_CALL(btn_trigger_, arm(_)).WillOnce(Return(ESP_OK));
 
     sut_->tick(50);
 }

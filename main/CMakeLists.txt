@@ -14,6 +14,7 @@ idf_component_register(
         "src/contactor_controller.cpp"
         "src/pump_led_controller.cpp"
         "src/pump_controller.cpp"
+        "src/ota_controller.cpp"
     INCLUDE_DIRS
         "include"
         "include/interfaces"
@@ -22,6 +23,7 @@ idf_component_register(
         smart-farm-common
         espnow_manager
         wifi_manager
+        ota_manager
         ui_inputs
         time_manager
         driver

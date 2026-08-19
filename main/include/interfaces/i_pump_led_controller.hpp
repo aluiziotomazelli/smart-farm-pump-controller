@@ -36,4 +36,9 @@ public:
      * @param source Current active power source.
      */
     virtual void update(farm::LoadState state, farm::PowerSource source) = 0;
+
+    /**
+     * @brief Sets both LEDs to OTA_UPDATING pattern during firmware update.
+     */
+    virtual void set_ota_updating() = 0;
 };

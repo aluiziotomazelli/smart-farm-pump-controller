@@ -11,6 +11,7 @@ add_test(NAME test_pump_status_reporter COMMAND ../test_pump_status_reporter/bui
 add_test(NAME test_contactor_controller COMMAND ../test_contactor_controller/build/test_contactor_controller.elf)
 add_test(NAME test_pump_led_controller COMMAND ../test_pump_led_controller/build/test_pump_led_controller.elf)
 add_test(NAME test_pump_controller COMMAND ../test_pump_controller/build/test_pump_controller.elf)
+add_test(NAME test_ota_controller COMMAND ../test_ota_controller/build/test_ota_controller.elf)
 
 # Unified Coverage Configuration
 find_program(LCOV_PATH lcov REQUIRED)
@@ -46,6 +47,7 @@ add_custom_target(build_all_tests
     COMMAND idf.py -C ../test_contactor_controller build
     COMMAND idf.py -C ../test_pump_led_controller build
     COMMAND idf.py -C ../test_pump_controller build
+    COMMAND idf.py -C ../test_ota_controller build
     COMMENT "Building all test projects using idf.py"
 )
 

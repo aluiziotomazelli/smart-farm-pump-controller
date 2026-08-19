@@ -30,6 +30,9 @@ public:
     /** @copydoc IPumpLedController::update */
     void update(farm::LoadState state, farm::PowerSource source) override;
 
+    /** @copydoc IPumpLedController::set_ota_updating */
+    void set_ota_updating() override;
+
 private:
     ILedController& led_grid_;
     ILedController& led_solar_;
