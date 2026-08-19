@@ -100,57 +100,66 @@ esp_err_t PumpController::init()
 
     update_running_version();
 
-    if (!check_firmware_health(session_healthy)) {
-        return ESP_FAIL;
-    }
-
     command_handler_.set_core_data(core_);
 
     err = state_machine_.init();
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "Failed to init state machine: %s", esp_err_to_name(err));
+        session_healthy = false;
         return err;
     }
 
     err = status_reporter_.init();
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "Failed to init status reporter: %s", esp_err_to_name(err));
+        session_healthy = false;
         return err;
     }
 
     err = led_controller_.init();
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "Failed to init LED controller: %s", esp_err_to_name(err));
+        session_healthy = false;
         return err;
     }
 
     err = tank_display_.init();
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "Failed to init tank display: %s", esp_err_to_name(err));
+        session_healthy = false;
         return err;
     }
 
     err = switch_mode_.init();
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "Failed to init mode switch: %s", esp_err_to_name(err));
+        session_healthy = false;
         return err;
     }
 
     err = switch_source_.init();
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "Failed to init source switch: %s", esp_err_to_name(err));
+        session_healthy = false;
         return err;
     }
 
     err = button_action_.init();
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "Failed to init action button: %s", esp_err_to_name(err));
+        session_healthy = false;
         return err;
     }
 
     err = btn_trigger_.arm(*this);
     if (err != ESP_OK) {
         ESP_LOGW(TAG, "Failed to arm Boot Button OTA trigger: %s", esp_err_to_name(err));
+        session_healthy = false;
+    }
+
+    // Perform post-boot firmware verification after all subsystems initialized
+    if (!check_firmware_health(session_healthy)) {
+        return ESP_FAIL;
     }
 
     ESP_LOGI(
