@@ -114,7 +114,6 @@ TEST_F(PumpControllerTest, InitInitializesAllSubsystemsAndStorage)
     EXPECT_CALL(mock_wifi_, add_credentials(::testing::StrEq(WIFI_SSID), ::testing::StrEq(WIFI_PASS)))
         .WillOnce(Return(ESP_OK));
     EXPECT_CALL(mock_wifi_, start(10000)).WillOnce(Return(ESP_OK));
-    EXPECT_CALL(mock_wifi_, connect(15000, 3, 1500)).WillOnce(Return(ESP_OK));
     EXPECT_CALL(state_machine_, init()).WillOnce(Return(ESP_OK));
     EXPECT_CALL(status_reporter_, init()).WillOnce(Return(ESP_OK));
     EXPECT_CALL(led_controller_, init()).WillOnce(Return(ESP_OK));
@@ -122,16 +121,6 @@ TEST_F(PumpControllerTest, InitInitializesAllSubsystemsAndStorage)
     EXPECT_CALL(switch_mode_, init()).WillOnce(Return(ESP_OK));
     EXPECT_CALL(switch_source_, init()).WillOnce(Return(ESP_OK));
     EXPECT_CALL(button_action_, init()).WillOnce(Return(ESP_OK));
-
-    EXPECT_EQ(sut_->init(), ESP_OK);
-}
-
-TEST_F(PumpControllerTest, InitWiFiFailureStillAllowsPumpControllerInit)
-{
-    EXPECT_CALL(mock_wifi_, init(_)).WillOnce(Return(ESP_OK));
-    EXPECT_CALL(mock_wifi_, add_credentials(_, _)).WillOnce(Return(ESP_OK));
-    EXPECT_CALL(mock_wifi_, start(10000)).WillOnce(Return(ESP_OK));
-    EXPECT_CALL(mock_wifi_, connect(15000, 3, 1500)).WillOnce(Return(ESP_FAIL));
 
     EXPECT_EQ(sut_->init(), ESP_OK);
 }

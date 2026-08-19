@@ -321,14 +321,7 @@ esp_err_t PumpController::init_wifi()
         return err;
     }
 
-    ESP_LOGI(TAG, "Connecting to WiFi with sync retries (timeout: 15000 ms, max_retries: 3)...");
-    err = wifi_manager_.connect(15000, 3, 1500);
-    if (err == ESP_OK) {
-        ESP_LOGI(TAG, "WiFi connected successfully via WiFiManager::connect");
-    } else {
-        ESP_LOGW(TAG, "WiFi connection failed after retries: %s; proceeding in standalone mode", esp_err_to_name(err));
-    }
-
+    ESP_LOGI(TAG, "WiFi initialized and started (ESP-NOW ready, connection on-demand for OTA)");
     return ESP_OK;
 }
 
