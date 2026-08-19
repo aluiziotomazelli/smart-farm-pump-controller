@@ -217,7 +217,8 @@ void PumpController::tick(uint32_t delta_ms)
             if (current_snapshot.state == farm::LoadState::RUNNING) {
                 ESP_LOGI(TAG, "Manual Action: Pump is RUNNING -> STOP triggered");
                 state_machine_.handle_manual_stop();
-            } else {
+            }
+            else {
                 ESP_LOGI(TAG, "Manual Action: Pump is OFF -> START triggered for source %d", static_cast<int>(source));
                 esp_err_t start_err = state_machine_.handle_manual_start(source);
                 if (start_err == ESP_OK) {
@@ -442,9 +443,12 @@ void PumpController::process_pending_ota()
 
     // 3. Connect to WiFi with sync retries
     ESP_LOGI(TAG, "Connecting to WiFi for OTA download (timeout: 15000 ms, max_retries: 3)...");
+    espnow_.set_channel_policy(espnow::ChannelPolicy::FIXED);
     esp_err_t wifi_err = wifi_manager_.connect(15000, 3, 1500);
     if (wifi_err != ESP_OK) {
         ESP_LOGE(TAG, "Failed to connect to WiFi for OTA (%s)", esp_err_to_name(wifi_err));
+        wifi_manager_.disconnect(2000);
+        espnow_.set_channel_policy(espnow::ChannelPolicy::SCAN);
         send_ota_report(farm::OtaExecResult::DOWNLOAD_FAILED, farm::OtaErrorCode::WIFI_CONNECT_FAILED);
         display_.set_override_pattern(TankStripPattern::AUTO);
         btn_trigger_.arm(*this);
@@ -465,9 +469,10 @@ void PumpController::process_pending_ota()
     }
     else {
         ESP_LOGE(TAG, "OTA download failed (error_code: %d)", static_cast<int>(result.error_code));
+        wifi_manager_.disconnect(2000);
+        espnow_.set_channel_policy(espnow::ChannelPolicy::SCAN);
         send_ota_report(result.exec_result, result.error_code);
         display_.set_override_pattern(TankStripPattern::AUTO);
-        wifi_manager_.disconnect(2000);
         btn_trigger_.arm(*this);
     }
 }
