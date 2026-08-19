@@ -14,6 +14,7 @@ list(APPEND EXTRA_COMPONENT_DIRS
     "${PROJECT_ROOT}/components/time_manager/host_test/mocks"
     "${PROJECT_ROOT}/components/ota_manager"
     "${PROJECT_ROOT}/components/ota_manager/host_test/mocks"
+    "${PROJECT_ROOT}/managed_components/espressif__led_strip"
     "${PROJECT_ROOT}/host_test/mocks"
     "${PROJECT_ROOT}/host_test/gtest"
 
@@ -33,6 +34,7 @@ set(COMPONENTS
     "ui_inputs"
     "time_manager"
     "idf_hals"
+    "espressif__led_strip"
     "esp_timer"
 )
 

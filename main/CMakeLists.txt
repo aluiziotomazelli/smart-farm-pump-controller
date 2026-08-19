@@ -15,6 +15,7 @@ idf_component_register(
         "src/pump_led_controller.cpp"
         "src/pump_controller.cpp"
         "src/ota_controller.cpp"
+        "src/hal_led_strip.cpp"
     INCLUDE_DIRS
         "include"
         "include/interfaces"
@@ -26,6 +27,7 @@ idf_component_register(
         ota_manager
         ui_inputs
         time_manager
+        espressif__led_strip
         driver
         esp_timer
         nvs_flash
