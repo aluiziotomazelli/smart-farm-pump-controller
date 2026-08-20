@@ -49,7 +49,7 @@ struct PumpStateMachineConfig
 struct PumpStatusReporterConfig
 {
     uint8_t circuit_id{0};                            ///< Circuit ID to report (default 0)
-    uint32_t heartbeat_interval_ms{5000};             ///< Periodic reporting interval (default 5s)
+    uint32_t running_report_interval_ms{5000};        ///< Periodic reporting interval while pump is RUNNING (default 5s)
     farm::NodeId dest_node_id{farm::NodeId::HUB};     ///< Destination node (Hub)
     bool require_ack{false};                          ///< True if telemetry requires transport ACK
 };

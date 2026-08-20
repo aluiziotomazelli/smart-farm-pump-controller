@@ -28,8 +28,11 @@ PumpStatusReporter::PumpStatusReporter(
 esp_err_t PumpStatusReporter::init()
 {
     elapsed_since_last_send_ms_ = 0;
-    ESP_LOGI(TAG, "PumpStatusReporter initialized (heartbeat: %lu ms, dest: 0x%02X)",
-             config_.heartbeat_interval_ms, static_cast<uint8_t>(config_.dest_node_id));
+    ESP_LOGI(
+        TAG,
+        "PumpStatusReporter initialized (running_interval: %lu ms, dest: 0x%02X)",
+        config_.running_report_interval_ms,
+        static_cast<uint8_t>(config_.dest_node_id));
     return ESP_OK;
 }
 
@@ -51,23 +54,26 @@ farm::LoadControlStatus PumpStatusReporter::build_status_payload() const
     return status;
 }
 
-esp_err_t PumpStatusReporter::send_status_report()
+esp_err_t PumpStatusReporter::send_status_report(bool require_ack)
 {
     farm::LoadControlStatus status = build_status_payload();
 
-    ESP_LOGI(TAG, "Sending LOAD_CONTROL_STATUS: state=%d, mode=%d, source=%d, runtime=%lu s, uptime=%lu s",
-             static_cast<int>(status.load_state),
-             static_cast<int>(status.control_mode),
-             static_cast<int>(status.active_power_source),
-             status.runtime_s,
-             status.uptime_s);
+    ESP_LOGI(
+        TAG,
+        "Sending LOAD_CONTROL_STATUS (ack=%s): state=%d, mode=%d, source=%d, runtime=%lu s, uptime=%lu s",
+        require_ack ? "true" : "false",
+        static_cast<int>(status.load_state),
+        static_cast<int>(status.control_mode),
+        static_cast<int>(status.active_power_source),
+        status.runtime_s,
+        status.uptime_s);
 
     esp_err_t err = espnow_.send_data(
         static_cast<espnow::NodeId>(config_.dest_node_id),
         static_cast<espnow::PayloadType>(farm::PayloadType::LOAD_CONTROL_STATUS),
         &status,
         sizeof(status),
-        config_.require_ack);
+        require_ack);
 
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "Failed to send LOAD_CONTROL_STATUS: %s", esp_err_to_name(err));
@@ -80,22 +86,65 @@ esp_err_t PumpStatusReporter::send_status_report()
 
 void PumpStatusReporter::tick(uint32_t delta_ms)
 {
-    // Check if state machine reported a transition
+    auto snapshot = state_machine_.get_snapshot();
+
+    // 1. Check if state machine reported a transition -> send immediately WITH ACK
     if (state_machine_.consume_state_changed()) {
-        ESP_LOGI(TAG, "State transition detected on tick; sending immediate status report");
-        send_status_report();
+        espnow_.set_enable_heartbeat(snapshot.state != farm::LoadState::RUNNING);
+
+        ESP_LOGI(TAG, "State transition detected on tick; sending immediate status report WITH ACK");
+        esp_err_t err = send_status_report(true);
+        if (err != ESP_OK) {
+            ESP_LOGW(TAG, "Failed to deliver state change report; scheduling retry");
+            pending_ack_retry_ = true;
+            retry_timer_ms_ = 0;
+        }
+        else {
+            pending_ack_retry_ = false;
+        }
         return;
     }
 
-    elapsed_since_last_send_ms_ += delta_ms;
-    if (elapsed_since_last_send_ms_ >= config_.heartbeat_interval_ms) {
-        ESP_LOGD(TAG, "Heartbeat timer expired; sending periodic status report");
-        send_status_report();
+    // 2. Retry unacknowledged state change report
+    if (pending_ack_retry_) {
+        retry_timer_ms_ += delta_ms;
+        if (retry_timer_ms_ >= RETRY_INTERVAL_MS) {
+            ESP_LOGI(TAG, "Retrying unacknowledged state change report WITH ACK...");
+            esp_err_t err = send_status_report(true);
+            if (err == ESP_OK) {
+                ESP_LOGI(TAG, "Pending state change report successfully delivered and ACKed");
+                pending_ack_retry_ = false;
+            }
+            retry_timer_ms_ = 0;
+        }
+        return;
+    }
+
+    // 3. Only send periodic telemetry while the pump is active (RUNNING) without blocking for ACK
+    if (snapshot.state == farm::LoadState::RUNNING) {
+        elapsed_since_last_send_ms_ += delta_ms;
+        if (elapsed_since_last_send_ms_ >= config_.running_report_interval_ms) {
+            ESP_LOGD(TAG, "Running report timer expired; sending periodic status report");
+            send_status_report(false);
+        }
+    }
+    else {
+        elapsed_since_last_send_ms_ = 0;
     }
 }
 
 void PumpStatusReporter::notify_state_change()
 {
-    ESP_LOGI(TAG, "Explicit notify_state_change triggered");
-    send_status_report();
+    auto snapshot = state_machine_.get_snapshot();
+    espnow_.set_enable_heartbeat(snapshot.state != farm::LoadState::RUNNING);
+
+    ESP_LOGI(TAG, "Explicit notify_state_change triggered; sending status report WITH ACK");
+    esp_err_t err = send_status_report(true);
+    if (err != ESP_OK) {
+        pending_ack_retry_ = true;
+        retry_timer_ms_ = 0;
+    }
+    else {
+        pending_ack_retry_ = false;
+    }
 }

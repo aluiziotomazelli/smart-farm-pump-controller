@@ -77,6 +77,7 @@ protected:
         ON_CALL(switch_mode_, init()).WillByDefault(Return(ESP_OK));
         ON_CALL(switch_source_, init()).WillByDefault(Return(ESP_OK));
         ON_CALL(button_action_, init()).WillByDefault(Return(ESP_OK));
+        ON_CALL(espnow_, init(_)).WillByDefault(Return(ESP_OK));
         ON_CALL(hal_rtos_, queue_receive(_, _, _)).WillByDefault(Return(pdFALSE));
         ON_CALL(hal_rtos_, task_create(_, _, _, _, _, _)).WillByDefault(Return(pdPASS));
 
@@ -98,6 +99,7 @@ protected:
             hal_rtos_);
 
         sut_ = std::make_unique<PumpController>(
+            dummy_queue_,
             nvs_core_,
             pump_nvs_,
             state_machine_,
@@ -126,6 +128,8 @@ TEST_F(PumpControllerTest, InitInitializesAllSubsystemsAndStorage)
     EXPECT_CALL(mock_wifi_, start(10000)).WillOnce(Return(ESP_OK));
     EXPECT_CALL(mock_ota_, init(_)).WillOnce(Return(true));
     EXPECT_CALL(btn_trigger_, arm(_)).WillOnce(Return(ESP_OK));
+    EXPECT_CALL(espnow_, init(::testing::Field(&espnow::EspNowConfig::node_id, static_cast<espnow::NodeId>(farm::NodeId::PUMP_CONTROL))))
+        .WillOnce(Return(ESP_OK));
     EXPECT_CALL(state_machine_, init()).WillOnce(Return(ESP_OK));
     EXPECT_CALL(status_reporter_, init()).WillOnce(Return(ESP_OK));
     EXPECT_CALL(display_, init()).WillOnce(Return(ESP_OK));

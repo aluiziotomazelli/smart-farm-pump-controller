@@ -29,6 +29,7 @@ class PumpController : public IPumpController, public IOtaTriggerListener
 {
 public:
     PumpController(
+        QueueHandle_t rx_queue,
         INvsCore& core_storage,
         IPumpNvs& pump_storage,
         IPumpStateMachine& state_machine,
@@ -77,6 +78,7 @@ public:
     bool is_pending_controller_commit() const { return pending_controller_commit_; }
 
 private:
+    QueueHandle_t rx_queue_;
     INvsCore& core_storage_;
     IPumpNvs& pump_storage_;
     IPumpStateMachine& state_machine_;
@@ -109,6 +111,7 @@ private:
     esp_err_t init_pump_storage();
     esp_err_t init_wifi();
     esp_err_t init_ota();
+    esp_err_t init_espnow();
     void update_running_version();
     bool check_firmware_health(bool session_healthy);
 

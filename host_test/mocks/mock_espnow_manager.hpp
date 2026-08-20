@@ -47,6 +47,10 @@ public:
     MOCK_METHOD(esp_err_t, start_pairing, (uint32_t timeout_ms), (override));
     MOCK_METHOD(esp_err_t, reconnect, (), (override));
 
+    MOCK_METHOD(void, set_enable_heartbeat, (bool enable), (override));
+    MOCK_METHOD(bool, is_heartbeat_enabled, (), (const, override));
+    MOCK_METHOD(void, set_heartbeat_interval_ms, (uint32_t interval_ms), (override));
+
     MOCK_METHOD(NodeState, get_node_state, (), (const, override));
     MOCK_METHOD(bool, is_initialized, (), (const, override));
 };

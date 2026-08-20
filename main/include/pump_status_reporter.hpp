@@ -24,11 +24,13 @@ public:
 
     ~PumpStatusReporter() override = default;
 
+    static constexpr uint32_t RETRY_INTERVAL_MS = 1000;
+
     /** @copydoc IPumpStatusReporter::init */
     esp_err_t init() override;
 
     /** @copydoc IPumpStatusReporter::send_status_report */
-    esp_err_t send_status_report() override;
+    esp_err_t send_status_report(bool require_ack = false) override;
 
     /** @copydoc IPumpStatusReporter::tick */
     void tick(uint32_t delta_ms) override;
@@ -43,6 +45,8 @@ private:
     PumpStatusReporterConfig config_;
 
     uint32_t elapsed_since_last_send_ms_{0};
+    bool pending_ack_retry_{false};
+    uint32_t retry_timer_ms_{0};
 
     farm::LoadControlStatus build_status_payload() const;
 };

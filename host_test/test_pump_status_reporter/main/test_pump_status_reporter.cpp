@@ -24,7 +24,7 @@ protected:
     NiceMock<idf_hals::MockTimerHAL> hal_timer_;
     PumpStatusReporterConfig config_{
         .circuit_id = 0,
-        .heartbeat_interval_ms = 5000,
+        .running_report_interval_ms = 5000,
         .dest_node_id = farm::NodeId::HUB,
         .require_ack = false};
 
@@ -81,40 +81,131 @@ TEST_F(PumpStatusReporterTest, SendStatusReportFormatsAndTransmitsPayload)
     EXPECT_EQ(captured_status.uptime_s, 3600);
 }
 
-TEST_F(PumpStatusReporterTest, HeartbeatTickTriggersPeriodicSend)
+TEST_F(PumpStatusReporterTest, RunningTickTriggersPeriodicSendWithoutAckWhenRunning)
 {
-    EXPECT_CALL(espnow_, send_data(_, _, _, _, _)).Times(0);
+    EXPECT_CALL(espnow_, send_data(_, _, _, _, false)).Times(0);
     sut_->tick(4000); // 4s < 5s interval
 
-    EXPECT_CALL(espnow_, send_data(_, _, _, _, _)).Times(1);
-    sut_->tick(1000); // 5s reached
+    // After 5s, sends without ACK (require_ack = false)
+    EXPECT_CALL(espnow_, send_data(_, _, _, _, false)).Times(1);
+    sut_->tick(1000);
 }
 
-TEST_F(PumpStatusReporterTest, StateChangeDetectedOnTickSendsImmediatelyAndResetsHeartbeat)
+TEST_F(PumpStatusReporterTest, IdleTickDoesNotSendPeriodicReport)
+{
+    PumpStateSnapshot idle_snapshot{
+        .state = farm::LoadState::IDLE,
+        .mode = farm::ControlMode::AUTO,
+        .source = farm::PowerSource::SOLAR,
+        .runtime_s = 0,
+        .remaining_watchdog_s = 0,
+        .state_changed = false};
+    EXPECT_CALL(state_machine_, get_snapshot()).WillRepeatedly(Return(idle_snapshot));
+
+    // Even after 10000ms, no periodic report should be sent in IDLE
+    EXPECT_CALL(espnow_, send_data(_, _, _, _, _)).Times(0);
+    sut_->tick(10000);
+}
+
+TEST_F(PumpStatusReporterTest, StateChangeDetectedOnTickSendsImmediatelyWithAckAndResetsRunningTimer)
 {
     EXPECT_CALL(state_machine_, consume_state_changed()).WillOnce(Return(true));
-    EXPECT_CALL(espnow_, send_data(_, _, _, _, _)).Times(1);
+    // State change MUST require ACK (require_ack = true)
+    EXPECT_CALL(espnow_, send_data(_, _, _, _, true)).Times(1).WillOnce(Return(ESP_OK));
 
     sut_->tick(100); // Triggered immediately due to state change
 
-    // Heartbeat timer was reset, so 4000ms later it shouldn't send yet
+    // Timer was reset, so 4000ms later it shouldn't send yet
     EXPECT_CALL(state_machine_, consume_state_changed()).WillRepeatedly(Return(false));
     EXPECT_CALL(espnow_, send_data(_, _, _, _, _)).Times(0);
     sut_->tick(4000);
 
-    // After remaining 1000ms, heartbeat triggers
-    EXPECT_CALL(espnow_, send_data(_, _, _, _, _)).Times(1);
+    // After remaining 1000ms, running periodic report triggers without ACK
+    EXPECT_CALL(espnow_, send_data(_, _, _, _, false)).Times(1);
     sut_->tick(1000);
 }
 
-TEST_F(PumpStatusReporterTest, ExplicitNotifyStateChangeTriggersImmediateSend)
+TEST_F(PumpStatusReporterTest, FailedStateChangeReportSchedulesRetryUntilAcked)
 {
-    EXPECT_CALL(espnow_, send_data(_, _, _, _, _)).Times(1);
+    EXPECT_CALL(state_machine_, consume_state_changed()).WillOnce(Return(true));
+    // First attempt fails (timeout/nack)
+    EXPECT_CALL(espnow_, send_data(_, _, _, _, true)).WillOnce(Return(ESP_ERR_TIMEOUT));
+
+    sut_->tick(100); // Triggers state change, fails, schedules retry
+
+    EXPECT_CALL(state_machine_, consume_state_changed()).WillRepeatedly(Return(false));
+
+    // Before retry timer (500ms < 1000ms), no send
+    EXPECT_CALL(espnow_, send_data(_, _, _, _, _)).Times(0);
+    sut_->tick(500);
+
+    // At 1000ms, retries WITH ACK and succeeds
+    EXPECT_CALL(espnow_, send_data(_, _, _, _, true)).WillOnce(Return(ESP_OK));
+    sut_->tick(500);
+
+    // After success, retry is cleared; next tick within interval sends nothing
+    EXPECT_CALL(espnow_, send_data(_, _, _, _, _)).Times(0);
+    sut_->tick(1000);
+}
+
+TEST_F(PumpStatusReporterTest, ExplicitNotifyStateChangeTriggersImmediateSendWithAck)
+{
+    EXPECT_CALL(espnow_, send_data(_, _, _, _, true)).Times(1).WillOnce(Return(ESP_OK));
     sut_->notify_state_change();
 }
 
 TEST_F(PumpStatusReporterTest, SendStatusReportPropagatesEspNowError)
 {
-    EXPECT_CALL(espnow_, send_data(_, _, _, _, _)).WillOnce(Return(ESP_FAIL));
-    EXPECT_EQ(sut_->send_status_report(), ESP_FAIL);
+    EXPECT_CALL(espnow_, send_data(_, _, _, _, false)).WillOnce(Return(ESP_FAIL));
+    EXPECT_EQ(sut_->send_status_report(false), ESP_FAIL);
+}
+
+TEST_F(PumpStatusReporterTest, StateTransitionToRunningDisablesHeartbeat)
+{
+    PumpStateSnapshot running_snapshot{
+        .state = farm::LoadState::RUNNING,
+        .mode = farm::ControlMode::AUTO,
+        .source = farm::PowerSource::SOLAR,
+        .runtime_s = 0,
+        .remaining_watchdog_s = 180,
+        .state_changed = true};
+    ON_CALL(state_machine_, get_snapshot()).WillByDefault(Return(running_snapshot));
+    EXPECT_CALL(state_machine_, consume_state_changed()).WillOnce(Return(true));
+    EXPECT_CALL(espnow_, set_enable_heartbeat(false)).Times(1);
+    EXPECT_CALL(espnow_, send_data(_, _, _, _, true)).WillOnce(Return(ESP_OK));
+
+    sut_->tick(10);
+}
+
+TEST_F(PumpStatusReporterTest, StateTransitionToIdleEnablesHeartbeat)
+{
+    PumpStateSnapshot idle_snapshot{
+        .state = farm::LoadState::IDLE,
+        .mode = farm::ControlMode::AUTO,
+        .source = farm::PowerSource::SOLAR,
+        .runtime_s = 0,
+        .remaining_watchdog_s = 0,
+        .state_changed = true};
+    ON_CALL(state_machine_, get_snapshot()).WillByDefault(Return(idle_snapshot));
+    EXPECT_CALL(state_machine_, consume_state_changed()).WillOnce(Return(true));
+    EXPECT_CALL(espnow_, set_enable_heartbeat(true)).Times(1);
+    EXPECT_CALL(espnow_, send_data(_, _, _, _, true)).WillOnce(Return(ESP_OK));
+
+    sut_->tick(10);
+}
+
+TEST_F(PumpStatusReporterTest, ExplicitNotifyStateChangeUpdatesHeartbeatState)
+{
+    PumpStateSnapshot running_snapshot{
+        .state = farm::LoadState::RUNNING,
+        .mode = farm::ControlMode::MANUAL,
+        .source = farm::PowerSource::GRID,
+        .runtime_s = 10,
+        .remaining_watchdog_s = 100,
+        .state_changed = false};
+    ON_CALL(state_machine_, get_snapshot()).WillByDefault(Return(running_snapshot));
+    EXPECT_CALL(espnow_, set_enable_heartbeat(false)).Times(1);
+    EXPECT_CALL(espnow_, send_data(_, _, _, _, true)).WillOnce(Return(ESP_OK));
+
+    sut_->notify_state_change();
 }

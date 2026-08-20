@@ -46,12 +46,12 @@
 static const char* TAG = "main";
 
 // Pinout mapping for Seeed Studio XIAO ESP32-C3
-static constexpr gpio_num_t PIN_BUTTON_ACTION   = GPIO_NUM_2; // D0
-static constexpr gpio_num_t PIN_SWITCH_MODE     = GPIO_NUM_3; // D1
-static constexpr gpio_num_t PIN_SWITCH_SOURCE   = GPIO_NUM_4; // D2
-static constexpr gpio_num_t PIN_CONTACTOR_GRID  = GPIO_NUM_5; // D3
+static constexpr gpio_num_t PIN_BUTTON_ACTION = GPIO_NUM_2;   // D0
+static constexpr gpio_num_t PIN_SWITCH_MODE = GPIO_NUM_3;     // D1
+static constexpr gpio_num_t PIN_SWITCH_SOURCE = GPIO_NUM_4;   // D2
+static constexpr gpio_num_t PIN_CONTACTOR_GRID = GPIO_NUM_5;  // D3
 static constexpr gpio_num_t PIN_CONTACTOR_SOLAR = GPIO_NUM_6; // D4
-static constexpr gpio_num_t PIN_LED_STRIP_DATA  = GPIO_NUM_7; // D5 (Addressable WS2812 strip DIN)
+static constexpr gpio_num_t PIN_LED_STRIP_DATA = GPIO_NUM_7;  // D5 (Addressable WS2812 strip DIN)
 static constexpr gpio_num_t PIN_BUTTON_BOOT_OTA = GPIO_NUM_9; // D9 (Onboard BOOT button)
 
 static constexpr const char* CORE_NVS_KEY = "core";
@@ -111,16 +111,13 @@ static PumpStateMachine state_machine{contactor_ctrl, output_monitor, fsm_config
 // Telemetry Reporter
 static PumpStatusReporterConfig reporter_config{
     .circuit_id = 0,
-    .heartbeat_interval_ms = 5000,
+    .running_report_interval_ms = 5000,
     .dest_node_id = farm::NodeId::HUB,
     .require_ack = false};
-static PumpStatusReporter status_reporter{
-    espnow::EspNowManager::instance(), state_machine, hal_timer, reporter_config};
+static PumpStatusReporter status_reporter{espnow::EspNowManager::instance(), state_machine, hal_timer, reporter_config};
 
 // UI Inputs (Switches and Buttons)
-static ui_inputs::SwitchConfig switch_cfg{
-    .debounce_ms = 50,
-    .enable_internal_pull = true};
+static ui_inputs::SwitchConfig switch_cfg{.debounce_ms = 50, .enable_internal_pull = true};
 static ui_inputs::Switch switch_mode{hal_gpio, hal_timer, PIN_SWITCH_MODE, true, switch_cfg};
 static ui_inputs::Switch switch_source{hal_gpio, hal_timer, PIN_SWITCH_SOURCE, true, switch_cfg};
 
@@ -167,16 +164,11 @@ extern "C" void app_main()
     auto& wifi = wifi_manager::WiFiManager::get_instance();
 
     // Instantiate Command Handler
-    PumpCommandHandler command_handler{
-        rx_queue,
-        espnow,
-        state_machine,
-        time_mgr,
-        tank_display,
-        hal_freertos};
+    PumpCommandHandler command_handler{rx_queue, espnow, state_machine, time_mgr, tank_display, hal_freertos};
 
     // Instantiate Main Orchestrator
     PumpController pump_controller{
+        rx_queue,
         nvs_core,
         pump_nvs,
         state_machine,

@@ -7,7 +7,7 @@ class MockPumpStatusReporter : public IPumpStatusReporter
 {
 public:
     MOCK_METHOD(esp_err_t, init, (), (override));
-    MOCK_METHOD(esp_err_t, send_status_report, (), (override));
+    MOCK_METHOD(esp_err_t, send_status_report, (bool require_ack), (override));
     MOCK_METHOD(void, tick, (uint32_t delta_ms), (override));
     MOCK_METHOD(void, notify_state_change, (), (override));
 };

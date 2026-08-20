@@ -27,6 +27,7 @@
 static const char* TAG = "PumpController";
 
 PumpController::PumpController(
+    QueueHandle_t rx_queue,
     INvsCore& core_storage,
     IPumpNvs& pump_storage,
     IPumpStateMachine& state_machine,
@@ -42,7 +43,8 @@ PumpController::PumpController(
     espnow::IEspNowManager& espnow,
     idf_hals::IHalFreertos& hal_rtos,
     idf_hals::ISystemHAL& hal_system)
-    : core_storage_(core_storage)
+    : rx_queue_(rx_queue)
+    , core_storage_(core_storage)
     , pump_storage_(pump_storage)
     , state_machine_(state_machine)
     , command_handler_(command_handler)
@@ -96,6 +98,12 @@ esp_err_t PumpController::init()
     }
 
     update_running_version();
+
+    err = init_espnow();
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to init ESP-NOW: %s", esp_err_to_name(err));
+        session_healthy = false;
+    }
 
     command_handler_.set_core_data(core_);
 
@@ -385,6 +393,19 @@ esp_err_t PumpController::init_ota()
     return ESP_OK;
 }
 
+esp_err_t PumpController::init_espnow()
+{
+    espnow::EspNowConfig config;
+    config.node_id = static_cast<espnow::NodeId>(farm::NodeId::PUMP_CONTROL);
+    config.node_type = static_cast<espnow::NodeType>(farm::NodeType::ACTUATOR);
+    config.app_rx_queue = rx_queue_;
+    config.wifi_channel = 1;
+    config.heartbeat_interval_ms = 3 * 60 * 1000; // 3 minutes
+    config.enable_heartbeat = true;
+
+    return espnow_.init(config);
+}
+
 void PumpController::update_running_version()
 {
     auto current_version = ota_controller_.get_running_version();
@@ -444,11 +465,13 @@ void PumpController::process_pending_ota()
     // 3. Connect to WiFi with sync retries
     ESP_LOGI(TAG, "Connecting to WiFi for OTA download (timeout: 15000 ms, max_retries: 3)...");
     espnow_.set_channel_policy(espnow::ChannelPolicy::FIXED);
+    espnow_.set_enable_heartbeat(false);
     esp_err_t wifi_err = wifi_manager_.connect(15000, 3, 1500);
     if (wifi_err != ESP_OK) {
         ESP_LOGE(TAG, "Failed to connect to WiFi for OTA (%s)", esp_err_to_name(wifi_err));
         wifi_manager_.disconnect(2000);
         espnow_.set_channel_policy(espnow::ChannelPolicy::SCAN);
+        espnow_.set_enable_heartbeat(true);
         send_ota_report(farm::OtaExecResult::DOWNLOAD_FAILED, farm::OtaErrorCode::WIFI_CONNECT_FAILED);
         display_.set_override_pattern(TankStripPattern::AUTO);
         btn_trigger_.arm(*this);
@@ -471,6 +494,7 @@ void PumpController::process_pending_ota()
         ESP_LOGE(TAG, "OTA download failed (error_code: %d)", static_cast<int>(result.error_code));
         wifi_manager_.disconnect(2000);
         espnow_.set_channel_policy(espnow::ChannelPolicy::SCAN);
+        espnow_.set_enable_heartbeat(true);
         send_ota_report(result.exec_result, result.error_code);
         display_.set_override_pattern(TankStripPattern::AUTO);
         btn_trigger_.arm(*this);
