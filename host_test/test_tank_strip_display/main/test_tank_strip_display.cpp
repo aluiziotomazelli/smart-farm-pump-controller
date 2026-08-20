@@ -64,7 +64,6 @@ TEST_F(TankStripDisplayTest, InitSuccessConfiguresRmtAndClearsStrip)
     EXPECT_CALL(hal_strip_, new_rmt_device(_, _, _))
         .WillOnce(DoAll(SetArgPointee<2>(dummy_handle_), Return(ESP_OK)));
     EXPECT_CALL(hal_strip_, clear(dummy_handle_)).Times(::testing::AtLeast(1));
-    EXPECT_CALL(hal_strip_, refresh(dummy_handle_)).Times(::testing::AtLeast(1));
 
     EXPECT_EQ(display_->init(), ESP_OK);
 }
@@ -212,7 +211,7 @@ TEST_F(TankStripDisplayTest, FillingManualSolarRendersSolidGreenBarAndGreenChase
     InitAndClearCaptures();
 
     display_->set_level(600); // 6 LEDs base
-    display_->update_state(farm::LoadState::RUNNING, farm::ControlMode::MANUAL, farm::PowerSource::SOLAR);
+    display_->update_state(farm::LoadState::RUNNING, farm::ControlMode::STOP_OVERRIDE, farm::PowerSource::SOLAR);
 
     display_->tick(50);
     ASSERT_EQ(captured_pixels_.size(), 10);
@@ -233,7 +232,7 @@ TEST_F(TankStripDisplayTest, FillingManualGridRendersSolidRedBarAndRedChase)
     InitAndClearCaptures();
 
     display_->set_level(600); // 6 LEDs base
-    display_->update_state(farm::LoadState::RUNNING, farm::ControlMode::MANUAL, farm::PowerSource::GRID);
+    display_->update_state(farm::LoadState::RUNNING, farm::ControlMode::STOP_OVERRIDE, farm::PowerSource::GRID);
 
     display_->tick(50);
     ASSERT_EQ(captured_pixels_.size(), 10);

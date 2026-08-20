@@ -39,6 +39,7 @@ protected:
             .state = farm::LoadState::RUNNING,
             .mode = farm::ControlMode::AUTO,
             .source = farm::PowerSource::SOLAR,
+            .power_w = 320,
             .runtime_s = 120,
             .remaining_watchdog_s = 180,
             .state_changed = false};
@@ -77,6 +78,7 @@ TEST_F(PumpStatusReporterTest, SendStatusReportFormatsAndTransmitsPayload)
     EXPECT_EQ(captured_status.control_mode, farm::ControlMode::AUTO);
     EXPECT_EQ(captured_status.active_power_source, farm::PowerSource::SOLAR);
     EXPECT_EQ(captured_status.load_state, farm::LoadState::RUNNING);
+    EXPECT_EQ(captured_status.power_w, 320);
     EXPECT_EQ(captured_status.runtime_s, 120);
     EXPECT_EQ(captured_status.uptime_s, 3600);
 }
@@ -97,6 +99,7 @@ TEST_F(PumpStatusReporterTest, IdleTickDoesNotSendPeriodicReport)
         .state = farm::LoadState::IDLE,
         .mode = farm::ControlMode::AUTO,
         .source = farm::PowerSource::SOLAR,
+        .power_w = 0,
         .runtime_s = 0,
         .remaining_watchdog_s = 0,
         .state_changed = false};
@@ -166,6 +169,7 @@ TEST_F(PumpStatusReporterTest, StateTransitionToRunningDisablesHeartbeat)
         .state = farm::LoadState::RUNNING,
         .mode = farm::ControlMode::AUTO,
         .source = farm::PowerSource::SOLAR,
+        .power_w = 320,
         .runtime_s = 0,
         .remaining_watchdog_s = 180,
         .state_changed = true};
@@ -183,6 +187,7 @@ TEST_F(PumpStatusReporterTest, StateTransitionToIdleEnablesHeartbeat)
         .state = farm::LoadState::IDLE,
         .mode = farm::ControlMode::AUTO,
         .source = farm::PowerSource::SOLAR,
+        .power_w = 0,
         .runtime_s = 0,
         .remaining_watchdog_s = 0,
         .state_changed = true};
@@ -198,8 +203,9 @@ TEST_F(PumpStatusReporterTest, ExplicitNotifyStateChangeUpdatesHeartbeatState)
 {
     PumpStateSnapshot running_snapshot{
         .state = farm::LoadState::RUNNING,
-        .mode = farm::ControlMode::MANUAL,
+        .mode = farm::ControlMode::STOP_OVERRIDE,
         .source = farm::PowerSource::GRID,
+        .power_w = 320,
         .runtime_s = 10,
         .remaining_watchdog_s = 100,
         .state_changed = false};

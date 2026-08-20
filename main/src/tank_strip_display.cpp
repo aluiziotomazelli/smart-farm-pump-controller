@@ -198,7 +198,7 @@ void TankStripDisplay::render_auto_pattern()
 
     switch (state_) {
     case farm::LoadState::RUNNING:
-        if (mode_ == farm::ControlMode::MANUAL) {
+        if (mode_ == farm::ControlMode::STOP_OVERRIDE || mode_ == farm::ControlMode::FULL_MANUAL) {
             render_filling_manual(active_leds, source_);
         }
         else {
@@ -372,7 +372,7 @@ void TankStripDisplay::render_boot_success()
 
     for (uint32_t i = 0; i < config_.num_leds; i++) {
         if (i < boot_sweep_idx_) {
-            render_pixel_hsv(i, HUE_CYAN, SAT_FULL, VAL_FULL);
+            render_pixel_hsv(i, HUE_GREEN, SAT_FULL, VAL_FULL);
         }
         else {
             render_pixel_hsv(i, 0, 0, 0);
