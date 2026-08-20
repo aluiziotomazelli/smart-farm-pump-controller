@@ -1,4 +1,3 @@
-// host_test/test_pump_controller/main/test_pump_controller.cpp
 #include <gtest/gtest.h>
 #include <gmock/gmock.h>
 #include <memory>
@@ -37,8 +36,8 @@ protected:
     NiceMock<time_manager::MockTimeManager> time_manager_;
     NiceMock<MockTankStripDisplay> display_;
     NiceMock<MockPumpStatusReporter> status_reporter_;
-    NiceMock<ui_inputs::MockSwitch> switch_mode_;
-    NiceMock<ui_inputs::MockSwitch> switch_source_;
+    NiceMock<ui_inputs::MockSwitch> switch_solar_;
+    NiceMock<ui_inputs::MockSwitch> switch_grid_;
     NiceMock<ui_inputs::MockButton> button_action_;
     NiceMock<wifi_manager::MockWiFiManager> mock_wifi_;
     NiceMock<MockOtaController> mock_ota_;
@@ -74,8 +73,8 @@ protected:
         ON_CALL(state_machine_, init()).WillByDefault(Return(ESP_OK));
         ON_CALL(status_reporter_, init()).WillByDefault(Return(ESP_OK));
         ON_CALL(display_, init()).WillByDefault(Return(ESP_OK));
-        ON_CALL(switch_mode_, init()).WillByDefault(Return(ESP_OK));
-        ON_CALL(switch_source_, init()).WillByDefault(Return(ESP_OK));
+        ON_CALL(switch_solar_, init()).WillByDefault(Return(ESP_OK));
+        ON_CALL(switch_grid_, init()).WillByDefault(Return(ESP_OK));
         ON_CALL(button_action_, init()).WillByDefault(Return(ESP_OK));
         ON_CALL(espnow_, init(_)).WillByDefault(Return(ESP_OK));
         ON_CALL(hal_rtos_, queue_receive(_, _, _)).WillByDefault(Return(pdFALSE));
@@ -85,6 +84,7 @@ protected:
             .state = farm::LoadState::IDLE,
             .mode = farm::ControlMode::AUTO,
             .source = farm::PowerSource::UNKNOWN,
+            .power_w = 0,
             .runtime_s = 0,
             .remaining_watchdog_s = 0,
             .state_changed = false};
@@ -106,8 +106,8 @@ protected:
             *command_handler_,
             status_reporter_,
             display_,
-            switch_mode_,
-            switch_source_,
+            switch_solar_,
+            switch_grid_,
             button_action_,
             mock_wifi_,
             mock_ota_,
@@ -133,8 +133,8 @@ TEST_F(PumpControllerTest, InitInitializesAllSubsystemsAndStorage)
     EXPECT_CALL(state_machine_, init()).WillOnce(Return(ESP_OK));
     EXPECT_CALL(status_reporter_, init()).WillOnce(Return(ESP_OK));
     EXPECT_CALL(display_, init()).WillOnce(Return(ESP_OK));
-    EXPECT_CALL(switch_mode_, init()).WillOnce(Return(ESP_OK));
-    EXPECT_CALL(switch_source_, init()).WillOnce(Return(ESP_OK));
+    EXPECT_CALL(switch_solar_, init()).WillOnce(Return(ESP_OK));
+    EXPECT_CALL(switch_grid_, init()).WillOnce(Return(ESP_OK));
     EXPECT_CALL(button_action_, init()).WillOnce(Return(ESP_OK));
     EXPECT_CALL(display_, set_override_pattern(TankStripPattern::BOOT_SUCCESS)).Times(1);
 
@@ -177,12 +177,29 @@ TEST_F(PumpControllerTest, StartLaunchesTask)
     EXPECT_EQ(sut_->start(), ESP_OK);
 }
 
-TEST_F(PumpControllerTest, TickSamplesSwitchModeAutoAndUpdatesStateMachine)
+TEST_F(PumpControllerTest, TickSamplesCenterSwitchAutoModeAndSendsFillRequestOnButtonClick)
 {
-    // Mode switch CLOSED -> AUTO mode
-    EXPECT_CALL(switch_mode_, update()).Times(1);
-    EXPECT_CALL(switch_mode_, get_state()).WillOnce(Return(ui_inputs::SwitchState::CLOSED));
-    EXPECT_CALL(state_machine_, set_control_mode(farm::ControlMode::AUTO)).Times(1);
+    // Center switch position: both OPEN -> UNKNOWN source lock
+    EXPECT_CALL(switch_solar_, update()).Times(1);
+    EXPECT_CALL(switch_grid_, update()).Times(1);
+    EXPECT_CALL(switch_solar_, get_state()).WillOnce(Return(ui_inputs::SwitchState::OPEN));
+    EXPECT_CALL(switch_grid_, get_state()).WillOnce(Return(ui_inputs::SwitchState::OPEN));
+    EXPECT_CALL(state_machine_, set_source_lock(farm::PowerSource::UNKNOWN)).Times(1);
+
+    // Button clicked when pump is IDLE in AUTO
+    EXPECT_CALL(button_action_, get_last_click()).WillOnce(Return(ui_inputs::ButtonClickType::CLICK));
+    PumpStateSnapshot idle_snapshot{
+        .state = farm::LoadState::IDLE,
+        .mode = farm::ControlMode::AUTO,
+        .source = farm::PowerSource::UNKNOWN,
+        .power_w = 0,
+        .runtime_s = 0,
+        .remaining_watchdog_s = 0,
+        .state_changed = false};
+    EXPECT_CALL(state_machine_, get_snapshot()).WillRepeatedly(Return(idle_snapshot));
+
+    EXPECT_CALL(espnow_, send_data(espnow::ReservedIds::HUB, static_cast<uint8_t>(farm::PayloadType::FILL_REQUEST), _, sizeof(farm::FillRequest), true))
+        .WillOnce(Return(ESP_OK));
 
     EXPECT_CALL(state_machine_, tick(50)).Times(1);
     EXPECT_CALL(status_reporter_, tick(50)).Times(1);
@@ -192,27 +209,26 @@ TEST_F(PumpControllerTest, TickSamplesSwitchModeAutoAndUpdatesStateMachine)
     sut_->tick(50);
 }
 
-TEST_F(PumpControllerTest, TickSamplesSwitchModeManualAndHandlesActionButtonStartsPumpWhenOff)
+TEST_F(PumpControllerTest, TickSamplesSolarSwitchAndHandlesOperatorStartWhenOff)
 {
-    // Mode switch OPEN -> MANUAL mode
-    EXPECT_CALL(switch_mode_, get_state()).WillOnce(Return(ui_inputs::SwitchState::OPEN));
-    EXPECT_CALL(state_machine_, set_control_mode(farm::ControlMode::MANUAL)).Times(1);
+    // Solar switch CLOSED, Grid OPEN -> SOLAR locked
+    EXPECT_CALL(switch_solar_, get_state()).WillOnce(Return(ui_inputs::SwitchState::CLOSED));
+    EXPECT_CALL(switch_grid_, get_state()).WillOnce(Return(ui_inputs::SwitchState::OPEN));
+    EXPECT_CALL(state_machine_, set_source_lock(farm::PowerSource::SOLAR)).Times(1);
 
-    // Source switch CLOSED -> SOLAR
-    EXPECT_CALL(switch_source_, get_state()).WillOnce(Return(ui_inputs::SwitchState::CLOSED));
-
-    // Action button clicked when pump is IDLE
+    // Button clicked when pump is IDLE
     EXPECT_CALL(button_action_, get_last_click()).WillOnce(Return(ui_inputs::ButtonClickType::CLICK));
     PumpStateSnapshot idle_snapshot{
         .state = farm::LoadState::IDLE,
-        .mode = farm::ControlMode::MANUAL,
-        .source = farm::PowerSource::UNKNOWN,
+        .mode = farm::ControlMode::SOURCE_LOCKED,
+        .source = farm::PowerSource::SOLAR,
+        .power_w = 0,
         .runtime_s = 0,
         .remaining_watchdog_s = 0,
         .state_changed = false};
-    EXPECT_CALL(state_machine_, get_snapshot()).WillOnce(Return(idle_snapshot)).WillRepeatedly(Return(idle_snapshot));
+    EXPECT_CALL(state_machine_, get_snapshot()).WillRepeatedly(Return(idle_snapshot));
 
-    EXPECT_CALL(state_machine_, handle_manual_start(farm::PowerSource::SOLAR)).WillOnce(Return(ESP_OK));
+    EXPECT_CALL(state_machine_, handle_operator_start(farm::PowerSource::SOLAR)).WillOnce(Return(ESP_OK));
     EXPECT_CALL(pump_nvs_, save_app_data(_, false)).Times(1);
 
     sut_->tick(50);
@@ -220,23 +236,34 @@ TEST_F(PumpControllerTest, TickSamplesSwitchModeManualAndHandlesActionButtonStar
     EXPECT_EQ(sut_->get_stats().start_cycles_total, 1);
 }
 
-TEST_F(PumpControllerTest, TickSamplesSwitchModeManualAndHandlesActionButtonStopsPumpWhenRunning)
+TEST_F(PumpControllerTest, TickSamplesDualSwitchConflictDefaultsToGrid)
 {
-    // Mode switch OPEN -> MANUAL mode
-    EXPECT_CALL(switch_mode_, get_state()).WillOnce(Return(ui_inputs::SwitchState::OPEN));
+    // Dual closed conflict (mechanical error) -> defaults to GRID
+    EXPECT_CALL(switch_solar_, get_state()).WillOnce(Return(ui_inputs::SwitchState::CLOSED));
+    EXPECT_CALL(switch_grid_, get_state()).WillOnce(Return(ui_inputs::SwitchState::CLOSED));
+    EXPECT_CALL(state_machine_, set_source_lock(farm::PowerSource::GRID)).Times(1);
 
-    // Action button clicked when pump is RUNNING
+    sut_->tick(50);
+}
+
+TEST_F(PumpControllerTest, TickHandlesOperatorStopWhenPumpIsRunning)
+{
+    // Running state
+    EXPECT_CALL(switch_solar_, get_state()).WillOnce(Return(ui_inputs::SwitchState::CLOSED));
+    EXPECT_CALL(switch_grid_, get_state()).WillOnce(Return(ui_inputs::SwitchState::OPEN));
+
     EXPECT_CALL(button_action_, get_last_click()).WillOnce(Return(ui_inputs::ButtonClickType::CLICK));
     PumpStateSnapshot running_snapshot{
         .state = farm::LoadState::RUNNING,
-        .mode = farm::ControlMode::MANUAL,
+        .mode = farm::ControlMode::STOP_OVERRIDE,
         .source = farm::PowerSource::SOLAR,
+        .power_w = 320,
         .runtime_s = 15,
-        .remaining_watchdog_s = 3585,
+        .remaining_watchdog_s = 0,
         .state_changed = false};
-    EXPECT_CALL(state_machine_, get_snapshot()).WillOnce(Return(running_snapshot)).WillRepeatedly(Return(running_snapshot));
+    EXPECT_CALL(state_machine_, get_snapshot()).WillRepeatedly(Return(running_snapshot));
 
-    EXPECT_CALL(state_machine_, handle_manual_stop()).Times(1);
+    EXPECT_CALL(state_machine_, handle_operator_stop()).Times(1);
 
     sut_->tick(50);
 }
@@ -258,7 +285,7 @@ TEST_F(PumpControllerTest, TickHandlesRebootCommandGracefullyAndPersistsState)
 
     EXPECT_CALL(nvs_core_, save_core(_, true)).Times(1);
     EXPECT_CALL(pump_nvs_, save_app_data(_, true)).Times(1);
-    EXPECT_CALL(state_machine_, handle_manual_stop()).Times(1);
+    EXPECT_CALL(state_machine_, handle_operator_stop()).Times(1);
     EXPECT_CALL(hal_system_, restart()).Times(1);
 
     sut_->tick(50);
@@ -279,7 +306,7 @@ TEST_F(PumpControllerTest, TickHandlesOtaCommandStopsPumpConnectsWiFiAndRestarts
         .WillRepeatedly(Return(pdFALSE));
 
     EXPECT_CALL(btn_trigger_, disarm()).Times(::testing::AtLeast(1));
-    EXPECT_CALL(state_machine_, handle_manual_stop()).Times(1);
+    EXPECT_CALL(state_machine_, handle_operator_stop()).Times(1);
     EXPECT_CALL(display_, set_override_pattern(TankStripPattern::OTA_UPDATING)).Times(1);
     EXPECT_CALL(mock_wifi_, connect(15000, 3, 1500)).WillOnce(Return(ESP_OK));
 
@@ -301,7 +328,7 @@ TEST_F(PumpControllerTest, ButtonOtaTriggerInvokesOtaFlowOnTick)
     sut_->on_ota_triggered(OtaTriggerSource::BUTTON);
 
     EXPECT_CALL(btn_trigger_, disarm()).Times(::testing::AtLeast(1));
-    EXPECT_CALL(state_machine_, handle_manual_stop()).Times(1);
+    EXPECT_CALL(state_machine_, handle_operator_stop()).Times(1);
     EXPECT_CALL(display_, set_override_pattern(TankStripPattern::OTA_UPDATING)).Times(1);
     EXPECT_CALL(mock_wifi_, connect(15000, 3, 1500)).WillOnce(Return(ESP_OK));
 
@@ -332,7 +359,7 @@ TEST_F(PumpControllerTest, TickHandlesOtaCommandWiFiFailureSendsReportAndRearmsT
         .WillRepeatedly(Return(pdFALSE));
 
     EXPECT_CALL(btn_trigger_, disarm()).Times(::testing::AtLeast(1));
-    EXPECT_CALL(state_machine_, handle_manual_stop()).Times(1);
+    EXPECT_CALL(state_machine_, handle_operator_stop()).Times(1);
     EXPECT_CALL(display_, set_override_pattern(TankStripPattern::OTA_UPDATING)).Times(1);
     EXPECT_CALL(espnow_, set_channel_policy(espnow::ChannelPolicy::FIXED)).Times(1);
     EXPECT_CALL(mock_wifi_, connect(15000, 3, 1500)).WillOnce(Return(ESP_FAIL));
@@ -362,7 +389,7 @@ TEST_F(PumpControllerTest, TickHandlesOtaCommandDownloadFailureSendsReportAndRes
         .WillRepeatedly(Return(pdFALSE));
 
     EXPECT_CALL(btn_trigger_, disarm()).Times(::testing::AtLeast(1));
-    EXPECT_CALL(state_machine_, handle_manual_stop()).Times(1);
+    EXPECT_CALL(state_machine_, handle_operator_stop()).Times(1);
     EXPECT_CALL(display_, set_override_pattern(TankStripPattern::OTA_UPDATING)).Times(1);
     EXPECT_CALL(espnow_, set_channel_policy(espnow::ChannelPolicy::FIXED)).Times(1);
     EXPECT_CALL(mock_wifi_, connect(15000, 3, 1500)).WillOnce(Return(ESP_OK));
@@ -386,6 +413,7 @@ TEST_F(PumpControllerTest, TickRuntimeAccountingIncrementsHourmeter)
         .state = farm::LoadState::RUNNING,
         .mode = farm::ControlMode::AUTO,
         .source = farm::PowerSource::SOLAR,
+        .power_w = 320,
         .runtime_s = 10,
         .remaining_watchdog_s = 3590,
         .state_changed = false};
