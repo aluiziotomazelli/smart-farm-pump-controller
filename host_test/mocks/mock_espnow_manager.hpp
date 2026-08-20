@@ -42,6 +42,7 @@ public:
     MOCK_METHOD(bool, get_peer_stats, (NodeId node_id, PeerStatistics& out), (const, override));
     MOCK_METHOD((etl::vector<PeerStatistics, MAX_PEERS>), get_all_peer_stats, (), (const, override));
     MOCK_METHOD((etl::vector<NodeId, MAX_PEERS>), get_offline_peers, (), (const, override));
+    MOCK_METHOD(bool, is_peer_online, (NodeId node_id), (const, override));
 
     MOCK_METHOD(esp_err_t, start_pairing, (uint32_t timeout_ms), (override));
     MOCK_METHOD(esp_err_t, reconnect, (), (override));
