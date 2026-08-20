@@ -26,6 +26,7 @@ struct PumpStateSnapshot
     farm::LoadState state{farm::LoadState::IDLE};
     farm::ControlMode mode{farm::ControlMode::AUTO};
     farm::PowerSource source{farm::PowerSource::UNKNOWN};
+    uint16_t power_w{0};
     uint32_t runtime_s{0};
     uint32_t remaining_watchdog_s{0};
     bool state_changed{false};
@@ -40,6 +41,7 @@ struct PumpStateMachineConfig
     uint32_t default_watchdog_s{3600};     ///< Default watchdog timeout if 0 is passed
     uint32_t demagnetization_delay_ms{150}; ///< Delay between de-energizing one and energizing another
     bool enable_output_validation{false};   ///< If true, queries IOutputMonitor before/after actuation
+    uint16_t nominal_power_w{320};          ///< Nominal power consumption in Watts when active
 };
 
 /**
