@@ -1,4 +1,3 @@
-// main/include/interfaces/i_pump_state_machine.hpp
 #pragma once
 
 #include "esp_err.h"
@@ -21,37 +20,37 @@ public:
     virtual esp_err_t init() = 0;
 
     /**
-     * @brief Processes a remote LOAD_ON command (valid in AUTO mode).
+     * @brief Processes a remote LOAD_ON command (valid in AUTO and SOURCE_LOCKED modes).
      * @param cmd Load activation command parameters.
-     * @return ESP_OK if accepted, ESP_ERR_INVALID_STATE if in MANUAL mode or invalid source.
+     * @return ESP_OK if accepted, ESP_ERR_INVALID_STATE if in STOP_OVERRIDE/FULL_MANUAL or invalid source.
      */
     virtual esp_err_t handle_load_on(const farm::LoadOnCommand& cmd) = 0;
 
     /**
-     * @brief Processes a remote LOAD_OFF command (valid in AUTO mode).
+     * @brief Processes a remote LOAD_OFF command (valid in AUTO, SOURCE_LOCKED, and STOP_OVERRIDE modes).
      * @param cmd Load deactivation command parameters.
-     * @return ESP_OK on success.
+     * @return ESP_OK on success, ESP_ERR_INVALID_STATE in FULL_MANUAL.
      */
     virtual esp_err_t handle_load_off(const farm::LoadOffCommand& cmd) = 0;
 
     /**
-     * @brief Processes local operator activation in MANUAL mode.
+     * @brief Processes local operator start push button activation.
      * @param source Selected power source (GRID or SOLAR).
-     * @return ESP_OK on success, ESP_ERR_INVALID_STATE if in AUTO mode.
-     */
-    virtual esp_err_t handle_manual_start(farm::PowerSource source) = 0;
-
-    /**
-     * @brief Processes local operator deactivation in MANUAL mode.
      * @return ESP_OK on success.
      */
-    virtual esp_err_t handle_manual_stop() = 0;
+    virtual esp_err_t handle_operator_start(farm::PowerSource source) = 0;
 
     /**
-     * @brief Updates active operating control mode (AUTO or MANUAL).
-     * @param mode Selected control mode.
+     * @brief Processes local operator stop push button deactivation.
+     * @return ESP_OK on success.
      */
-    virtual void set_control_mode(farm::ControlMode mode) = 0;
+    virtual esp_err_t handle_operator_stop() = 0;
+
+    /**
+     * @brief Sets or clears the operator source lock based on hardware switch position.
+     * @param source Selected power source (UNKNOWN for AUTO center position, SOLAR or GRID).
+     */
+    virtual void set_source_lock(farm::PowerSource source) = 0;
 
     /**
      * @brief Periodic tick handler for watchdog countdown and runtime accumulation.
@@ -73,6 +72,11 @@ public:
      * @brief Returns currently active power source.
      */
     virtual farm::PowerSource get_active_source() const = 0;
+
+    /**
+     * @brief Returns currently locked power source.
+     */
+    virtual farm::PowerSource get_locked_source() const = 0;
 
     /**
      * @brief Returns continuous runtime of current active cycle in seconds.

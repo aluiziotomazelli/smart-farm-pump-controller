@@ -1,4 +1,3 @@
-// main/include/pump_state_machine.hpp
 #pragma once
 
 #include <cstdint>
@@ -31,14 +30,14 @@ public:
     /** @copydoc IPumpStateMachine::handle_load_off */
     esp_err_t handle_load_off(const farm::LoadOffCommand& cmd) override;
 
-    /** @copydoc IPumpStateMachine::handle_manual_start */
-    esp_err_t handle_manual_start(farm::PowerSource source) override;
+    /** @copydoc IPumpStateMachine::handle_operator_start */
+    esp_err_t handle_operator_start(farm::PowerSource source) override;
 
-    /** @copydoc IPumpStateMachine::handle_manual_stop */
-    esp_err_t handle_manual_stop() override;
+    /** @copydoc IPumpStateMachine::handle_operator_stop */
+    esp_err_t handle_operator_stop() override;
 
-    /** @copydoc IPumpStateMachine::set_control_mode */
-    void set_control_mode(farm::ControlMode mode) override;
+    /** @copydoc IPumpStateMachine::set_source_lock */
+    void set_source_lock(farm::PowerSource source) override;
 
     /** @copydoc IPumpStateMachine::tick */
     void tick(uint32_t delta_ms) override;
@@ -51,6 +50,9 @@ public:
 
     /** @copydoc IPumpStateMachine::get_active_source */
     farm::PowerSource get_active_source() const override { return active_source_; }
+
+    /** @copydoc IPumpStateMachine::get_locked_source */
+    farm::PowerSource get_locked_source() const override { return locked_source_; }
 
     /** @copydoc IPumpStateMachine::get_runtime_s */
     uint32_t get_runtime_s() const override { return runtime_s_; }
@@ -69,6 +71,7 @@ private:
     farm::LoadState state_{farm::LoadState::IDLE};
     farm::ControlMode control_mode_{farm::ControlMode::AUTO};
     farm::PowerSource active_source_{farm::PowerSource::UNKNOWN};
+    farm::PowerSource locked_source_{farm::PowerSource::UNKNOWN};
 
     uint32_t runtime_s_{0};
     uint32_t runtime_ms_accum_{0};

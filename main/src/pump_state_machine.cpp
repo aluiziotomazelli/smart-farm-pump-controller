@@ -1,4 +1,3 @@
-// main/src/pump_state_machine.cpp
 #include <cstdint>
 
 #define LOG_LOCAL_LEVEL ESP_LOG_INFO
@@ -38,7 +37,8 @@ esp_err_t PumpStateMachine::init()
 
     contactor_.deactivate();
     state_ = farm::LoadState::IDLE;
-    active_source_ = farm::PowerSource::UNKNOWN;
+    control_mode_ = (locked_source_ == farm::PowerSource::UNKNOWN) ? farm::ControlMode::AUTO : farm::ControlMode::SOURCE_LOCKED;
+    active_source_ = locked_source_;
     runtime_s_ = 0;
     runtime_ms_accum_ = 0;
     remaining_watchdog_ms_ = 0;
@@ -60,22 +60,24 @@ void PumpStateMachine::transition_to(farm::LoadState new_state, farm::PowerSourc
 
 esp_err_t PumpStateMachine::handle_load_on(const farm::LoadOnCommand& cmd)
 {
-    if (control_mode_ != farm::ControlMode::AUTO) {
-        ESP_LOGW(TAG, "Rejecting LOAD_ON: Not in AUTO mode");
+    if (control_mode_ == farm::ControlMode::STOP_OVERRIDE || control_mode_ == farm::ControlMode::FULL_MANUAL) {
+        ESP_LOGW(TAG, "Rejecting LOAD_ON: In override or manual mode (mode: %d)", static_cast<int>(control_mode_));
         return ESP_ERR_INVALID_STATE;
     }
 
-    if (cmd.power_source != farm::PowerSource::SOLAR && cmd.power_source != farm::PowerSource::GRID) {
+    farm::PowerSource target_source = (locked_source_ != farm::PowerSource::UNKNOWN) ? locked_source_ : cmd.power_source;
+
+    if (target_source != farm::PowerSource::SOLAR && target_source != farm::PowerSource::GRID) {
         ESP_LOGE(TAG, "Rejecting LOAD_ON: Invalid power source");
         return ESP_ERR_INVALID_ARG;
     }
 
     uint32_t timeout_s = (cmd.watchdog_timeout_s > 0) ? cmd.watchdog_timeout_s : config_.default_watchdog_s;
 
-    if (state_ == farm::LoadState::RUNNING && active_source_ == cmd.power_source) {
+    if (state_ == farm::LoadState::RUNNING && active_source_ == target_source) {
         // Watchdog refresh
         remaining_watchdog_ms_ = timeout_s * 1000;
-        ESP_LOGI(TAG, "Watchdog refreshed to %lu s", timeout_s);
+        ESP_LOGI(TAG, "Watchdog refreshed to %lu s", static_cast<unsigned long>(timeout_s));
         return ESP_OK;
     }
 
@@ -86,7 +88,7 @@ esp_err_t PumpStateMachine::handle_load_on(const farm::LoadOnCommand& cmd)
         return ESP_ERR_INVALID_STATE;
     }
 
-    esp_err_t err = contactor_.activate(cmd.power_source);
+    esp_err_t err = contactor_.activate(target_source);
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "Failed to activate contactor: %s", esp_err_to_name(err));
         transition_to(farm::LoadState::ERROR_NO_SOURCE, farm::PowerSource::UNKNOWN);
@@ -96,71 +98,111 @@ esp_err_t PumpStateMachine::handle_load_on(const farm::LoadOnCommand& cmd)
     runtime_s_ = 0;
     runtime_ms_accum_ = 0;
     remaining_watchdog_ms_ = timeout_s * 1000;
-    transition_to(farm::LoadState::RUNNING, cmd.power_source);
+    control_mode_ = (locked_source_ != farm::PowerSource::UNKNOWN) ? farm::ControlMode::SOURCE_LOCKED : farm::ControlMode::AUTO;
+    transition_to(farm::LoadState::RUNNING, target_source);
     return ESP_OK;
 }
 
 esp_err_t PumpStateMachine::handle_load_off(const farm::LoadOffCommand& cmd)
 {
     (void)cmd;
-    if (control_mode_ != farm::ControlMode::AUTO) {
-        ESP_LOGW(TAG, "Rejecting LOAD_OFF: Not in AUTO mode");
+    if (control_mode_ == farm::ControlMode::FULL_MANUAL) {
+        ESP_LOGW(TAG, "Rejecting LOAD_OFF: In FULL_MANUAL mode");
         return ESP_ERR_INVALID_STATE;
     }
 
     contactor_.deactivate();
     remaining_watchdog_ms_ = 0;
-    transition_to(farm::LoadState::IDLE, farm::PowerSource::UNKNOWN);
+    control_mode_ = (locked_source_ != farm::PowerSource::UNKNOWN) ? farm::ControlMode::SOURCE_LOCKED : farm::ControlMode::AUTO;
+    transition_to(farm::LoadState::IDLE, locked_source_);
     return ESP_OK;
 }
 
-esp_err_t PumpStateMachine::handle_manual_start(farm::PowerSource source)
+esp_err_t PumpStateMachine::handle_operator_start(farm::PowerSource source)
 {
-    if (control_mode_ != farm::ControlMode::MANUAL) {
-        ESP_LOGW(TAG, "Rejecting manual start: Not in MANUAL mode");
-        return ESP_ERR_INVALID_STATE;
-    }
-
     if (source != farm::PowerSource::SOLAR && source != farm::PowerSource::GRID) {
-        ESP_LOGE(TAG, "Rejecting manual start: Invalid power source");
+        ESP_LOGE(TAG, "Rejecting operator start: Invalid power source");
         return ESP_ERR_INVALID_ARG;
     }
 
     if (config_.enable_output_validation && monitor_.has_any_output_energy()) {
-        ESP_LOGE(TAG, "Output already energized before manual activation");
+        ESP_LOGE(TAG, "Output already energized before operator activation");
         transition_to(farm::LoadState::ERROR_CONTACTOR_STUCK, farm::PowerSource::UNKNOWN);
         contactor_.deactivate();
         return ESP_ERR_INVALID_STATE;
     }
 
+    if (state_ == farm::LoadState::RUNNING && active_source_ == source) {
+        control_mode_ = farm::ControlMode::STOP_OVERRIDE;
+        state_changed_ = true;
+        return ESP_OK;
+    }
+
     esp_err_t err = contactor_.activate(source);
     if (err != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to manually activate contactor: %s", esp_err_to_name(err));
+        ESP_LOGE(TAG, "Failed to activate contactor on operator start: %s", esp_err_to_name(err));
         transition_to(farm::LoadState::ERROR_NO_SOURCE, farm::PowerSource::UNKNOWN);
         return err;
     }
 
     runtime_s_ = 0;
     runtime_ms_accum_ = 0;
-    remaining_watchdog_ms_ = 0; // No watchdog in MANUAL mode
+    remaining_watchdog_ms_ = 0; // No watchdog on local operator activation
+    control_mode_ = farm::ControlMode::STOP_OVERRIDE;
     transition_to(farm::LoadState::RUNNING, source);
     return ESP_OK;
 }
 
-esp_err_t PumpStateMachine::handle_manual_stop()
+esp_err_t PumpStateMachine::handle_operator_stop()
 {
     contactor_.deactivate();
     remaining_watchdog_ms_ = 0;
-    transition_to(farm::LoadState::IDLE, farm::PowerSource::UNKNOWN);
+    control_mode_ = (locked_source_ != farm::PowerSource::UNKNOWN) ? farm::ControlMode::SOURCE_LOCKED : farm::ControlMode::AUTO;
+    transition_to(farm::LoadState::IDLE, locked_source_);
     return ESP_OK;
 }
 
-void PumpStateMachine::set_control_mode(farm::ControlMode mode)
+void PumpStateMachine::set_source_lock(farm::PowerSource source)
 {
-    if (control_mode_ != mode) {
-        control_mode_ = mode;
+    if (locked_source_ == source) {
+        return;
+    }
+
+    locked_source_ = source;
+    ESP_LOGI(TAG, "Locked source updated to: %d", static_cast<int>(source));
+
+    if (state_ == farm::LoadState::IDLE) {
+        if (locked_source_ == farm::PowerSource::UNKNOWN) {
+            control_mode_ = farm::ControlMode::AUTO;
+            active_source_ = farm::PowerSource::UNKNOWN;
+        } else {
+            control_mode_ = farm::ControlMode::SOURCE_LOCKED;
+            active_source_ = locked_source_;
+        }
         state_changed_ = true;
-        ESP_LOGI(TAG, "Control mode changed to %d", static_cast<int>(mode));
+    } else if (state_ == farm::LoadState::RUNNING) {
+        if (locked_source_ == farm::PowerSource::UNKNOWN) {
+            if (control_mode_ == farm::ControlMode::SOURCE_LOCKED || control_mode_ == farm::ControlMode::STOP_OVERRIDE) {
+                control_mode_ = farm::ControlMode::AUTO;
+                state_changed_ = true;
+            }
+        } else {
+            if (control_mode_ == farm::ControlMode::AUTO) {
+                control_mode_ = farm::ControlMode::SOURCE_LOCKED;
+                state_changed_ = true;
+            }
+            if (active_source_ != locked_source_) {
+                ESP_LOGI(TAG, "Hot-switching source from %d to %d while RUNNING", static_cast<int>(active_source_), static_cast<int>(locked_source_));
+                esp_err_t err = contactor_.activate(locked_source_);
+                if (err == ESP_OK) {
+                    active_source_ = locked_source_;
+                    state_changed_ = true;
+                } else {
+                    ESP_LOGE(TAG, "Failed to hot-switch source: %s", esp_err_to_name(err));
+                    transition_to(farm::LoadState::ERROR_NO_SOURCE, farm::PowerSource::UNKNOWN);
+                }
+            }
+        }
     }
 }
 
@@ -174,12 +216,13 @@ void PumpStateMachine::tick(uint32_t delta_ms)
             runtime_ms_accum_ -= 1000;
         }
 
-        // AUTO mode watchdog countdown
-        if (control_mode_ == farm::ControlMode::AUTO && remaining_watchdog_ms_ > 0) {
+        // Watchdog countdown (active whenever remaining_watchdog_ms_ > 0)
+        if (remaining_watchdog_ms_ > 0) {
             if (delta_ms >= remaining_watchdog_ms_) {
                 remaining_watchdog_ms_ = 0;
                 ESP_LOGW(TAG, "Watchdog timeout expired! Deactivating pump.");
                 contactor_.deactivate();
+                control_mode_ = (locked_source_ != farm::PowerSource::UNKNOWN) ? farm::ControlMode::SOURCE_LOCKED : farm::ControlMode::AUTO;
                 transition_to(farm::LoadState::ERROR_TIMEOUT, farm::PowerSource::UNKNOWN);
             } else {
                 remaining_watchdog_ms_ -= delta_ms;
@@ -194,6 +237,7 @@ PumpStateSnapshot PumpStateMachine::get_snapshot() const
     snapshot.state = state_;
     snapshot.mode = control_mode_;
     snapshot.source = active_source_;
+    snapshot.power_w = (state_ == farm::LoadState::RUNNING) ? config_.nominal_power_w : 0;
     snapshot.runtime_s = runtime_s_;
     snapshot.remaining_watchdog_s = (remaining_watchdog_ms_ + 999) / 1000;
     snapshot.state_changed = state_changed_;
