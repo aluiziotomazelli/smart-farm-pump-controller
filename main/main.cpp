@@ -1,5 +1,6 @@
 // main/main.cpp
 #include <cstdint>
+#include <optional>
 
 #undef LOG_LOCAL_LEVEL
 #define LOG_LOCAL_LEVEL ESP_LOG_INFO
@@ -96,8 +97,8 @@ static NullOutputMonitor output_monitor;
 // Addressable LED Strip Unified Display (Level + Pump & OTA status)
 static TankStripConfig strip_cfg{
     .gpio_pin = PIN_LED_STRIP_DATA,
-    .num_leds = 10,
-    .default_brightness = 200,
+    .num_leds = 20,
+    .default_brightness = 50,
     .rmt_resolution_hz = 10 * 1000 * 1000};
 static TankStripDisplay tank_display{hal_led_strip, strip_cfg};
 
@@ -152,6 +153,9 @@ static OtaController ota_controller(ota_manager, hal_freertos);
 // Hardware Boot Button OTA Trigger (3000 ms long press)
 static ButtonOtaTrigger btn_trigger(hal_gpio, hal_freertos, PIN_BUTTON_BOOT_OTA, 3000);
 
+static std::optional<PumpCommandHandler> g_command_handler;
+static std::optional<PumpController> g_pump_controller;
+
 extern "C" void app_main()
 {
     ESP_LOGI(TAG, "Starting Smart Farm Pump Controller...");
@@ -163,16 +167,16 @@ extern "C" void app_main()
     auto& espnow = espnow::EspNowManager::instance();
     auto& wifi = wifi_manager::WiFiManager::get_instance();
 
-    // Instantiate Command Handler
-    PumpCommandHandler command_handler{rx_queue, espnow, state_machine, time_mgr, tank_display, hal_freertos};
+    // Instantiate Command Handler in static BSS storage
+    g_command_handler.emplace(rx_queue, espnow, state_machine, time_mgr, tank_display, hal_freertos);
 
-    // Instantiate Main Orchestrator
-    PumpController pump_controller{
+    // Instantiate Main Orchestrator in static BSS storage
+    g_pump_controller.emplace(
         rx_queue,
         nvs_core,
         pump_nvs,
         state_machine,
-        command_handler,
+        *g_command_handler,
         status_reporter,
         tank_display,
         switch_mode,
@@ -183,17 +187,17 @@ extern "C" void app_main()
         btn_trigger,
         espnow,
         hal_freertos,
-        hal_system};
+        hal_system);
 
     // Initialize all components and load persisted state
-    esp_err_t err = pump_controller.init();
+    esp_err_t err = g_pump_controller->init();
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "Failed to initialize PumpController: %s", esp_err_to_name(err));
         return;
     }
 
     // Start background tasks
-    err = pump_controller.start();
+    err = g_pump_controller->start();
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "Failed to start PumpController: %s", esp_err_to_name(err));
         return;

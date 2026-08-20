@@ -65,8 +65,11 @@ esp_err_t TankStripDisplay::init()
     }
 
     clear();
-    ESP_LOGI(TAG, "TankStripDisplay initialized (%lu LEDs on GPIO %d)",
-             static_cast<unsigned long>(config_.num_leds), config_.gpio_pin);
+    ESP_LOGI(
+        TAG,
+        "TankStripDisplay initialized (%lu LEDs on GPIO %d)",
+        static_cast<unsigned long>(config_.num_leds),
+        config_.gpio_pin);
     return ESP_OK;
 }
 
@@ -102,7 +105,6 @@ void TankStripDisplay::clear()
 {
     if (strip_handle_ != nullptr) {
         hal_strip_.clear(strip_handle_);
-        hal_strip_.refresh(strip_handle_);
     }
 }
 
@@ -127,7 +129,8 @@ void TankStripDisplay::tick(uint32_t delta_ms)
     // 1. Advance Timers
     if (idle_breathe_timer_ms_ > delta_ms) {
         idle_breathe_timer_ms_ -= delta_ms;
-    } else {
+    }
+    else {
         idle_breathe_timer_ms_ = 0;
     }
 
@@ -146,7 +149,8 @@ void TankStripDisplay::tick(uint32_t delta_ms)
                 ota_scan_pos_ = static_cast<int32_t>(config_.num_leds - 1);
                 ota_scan_forward_ = false;
             }
-        } else {
+        }
+        else {
             ota_scan_pos_--;
             if (ota_scan_pos_ <= 0) {
                 ota_scan_pos_ = 0;
@@ -196,7 +200,8 @@ void TankStripDisplay::render_auto_pattern()
     case farm::LoadState::RUNNING:
         if (mode_ == farm::ControlMode::MANUAL) {
             render_filling_manual(active_leds, source_);
-        } else {
+        }
+        else {
             render_filling_auto(active_leds, source_);
         }
         break;
@@ -222,7 +227,8 @@ void TankStripDisplay::render_timeout(uint32_t active_leds)
     for (uint32_t i = 0; i < active_leds; i++) {
         if (is_on && i == top_idx) {
             render_pixel_hsv(i, HUE_ORANGE, SAT_FULL, VAL_FULL);
-        } else {
+        }
+        else {
             render_pixel_hsv(i, HUE_CYAN, SAT_CYAN, VAL_CYAN);
         }
     }
@@ -245,7 +251,8 @@ void TankStripDisplay::render_idle(uint32_t active_leds)
     for (uint32_t i = 0; i < config_.num_leds; i++) {
         if (i < active_leds) {
             render_pixel_hsv(i, HUE_CYAN, SAT_CYAN, val);
-        } else {
+        }
+        else {
             render_pixel_hsv(i, 0, 0, 0);
         }
     }
@@ -268,11 +275,13 @@ void TankStripDisplay::render_filling_auto(uint32_t active_leds, farm::PowerSour
         for (uint32_t i = active_leds; i < config_.num_leds; i++) {
             if (i == chase_idx) {
                 render_pixel_hsv(i, source_hue, SAT_FULL, VAL_FULL);
-            } else {
+            }
+            else {
                 render_pixel_hsv(i, 0, 0, 0);
             }
         }
-    } else {
+    }
+    else {
         // Tank full: Top LED pulses in source color
         float phase = static_cast<float>(chase_timer_ms_) / 200.0f;
         uint8_t top_val = (phase < 0.5f) ? VAL_FULL : 80;
@@ -297,11 +306,13 @@ void TankStripDisplay::render_filling_manual(uint32_t active_leds, farm::PowerSo
         for (uint32_t i = active_leds; i < config_.num_leds; i++) {
             if (i == chase_idx) {
                 render_pixel_hsv(i, source_hue, SAT_FULL, VAL_FULL);
-            } else {
+            }
+            else {
                 render_pixel_hsv(i, 0, 0, 0);
             }
         }
-    } else {
+    }
+    else {
         // Full tank manual: Top LED flashes
         float phase = static_cast<float>(chase_timer_ms_) / 200.0f;
         uint8_t top_val = (phase < 0.5f) ? VAL_FULL : 80;
@@ -348,7 +359,8 @@ void TankStripDisplay::render_boot_success()
         boot_timer_ms_ -= 50;
         if (boot_sweep_idx_ < config_.num_leds) {
             boot_sweep_idx_++;
-        } else {
+        }
+        else {
             boot_hold_ms_ += 50;
             if (boot_hold_ms_ >= 500) {
                 // Return to normal automatic rendering after sweep holds 500ms
@@ -360,8 +372,9 @@ void TankStripDisplay::render_boot_success()
 
     for (uint32_t i = 0; i < config_.num_leds; i++) {
         if (i < boot_sweep_idx_) {
-            render_pixel_hsv(i, HUE_GREEN, SAT_FULL, VAL_FULL);
-        } else {
+            render_pixel_hsv(i, HUE_CYAN, SAT_FULL, VAL_FULL);
+        }
+        else {
             render_pixel_hsv(i, 0, 0, 0);
         }
     }
@@ -376,7 +389,8 @@ void TankStripDisplay::render_boot_error()
     for (uint32_t i = 0; i < config_.num_leds; i++) {
         if (is_on) {
             render_pixel_hsv(i, HUE_RED, SAT_FULL, VAL_FULL);
-        } else {
+        }
+        else {
             render_pixel_hsv(i, 0, 0, 0);
         }
     }
