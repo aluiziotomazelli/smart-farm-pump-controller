@@ -100,7 +100,7 @@ static TankStripConfig strip_cfg{
     .num_leds = 20,
     .default_brightness = 50,
     .rmt_resolution_hz = 10 * 1000 * 1000};
-static TankStripDisplay tank_display{hal_led_strip, strip_cfg};
+static TankStripDisplay tank_display{hal_led_strip, hal_freertos, strip_cfg};
 
 // State Machine
 static PumpStateMachineConfig fsm_config{
