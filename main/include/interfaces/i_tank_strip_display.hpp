@@ -74,10 +74,15 @@ public:
     virtual uint8_t get_brightness() const = 0;
 
     /**
-     * @brief Advances animation timers and pushes pixel buffer to hardware strip.
-     * @param delta_ms Elapsed time in milliseconds since last tick.
+     * @brief Starts the FreeRTOS background rendering task (20 FPS).
+     * @return ESP_OK on success, or error code.
      */
-    virtual void tick(uint32_t delta_ms) = 0;
+    virtual esp_err_t start() = 0;
+
+    /**
+     * @brief Stops the background rendering task and turns off strip.
+     */
+    virtual void stop() = 0;
 
     /**
      * @brief Clears and turns off all strip LEDs.

@@ -15,6 +15,7 @@ public:
     MOCK_METHOD(TankStripPattern, get_override_pattern, (), (const, override));
     MOCK_METHOD(void, set_brightness, (uint8_t brightness), (override));
     MOCK_METHOD(uint8_t, get_brightness, (), (const, override));
-    MOCK_METHOD(void, tick, (uint32_t delta_ms), (override));
+    MOCK_METHOD(esp_err_t, start, (), (override));
+    MOCK_METHOD(void, stop, (), (override));
     MOCK_METHOD(void, clear, (), (override));
 };
