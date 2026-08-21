@@ -33,6 +33,7 @@ protected:
     void SetUp() override
     {
         ON_CALL(espnow_, send_data(_, _, _, _, _)).WillByDefault(Return(ESP_OK));
+        ON_CALL(espnow_, get_node_state()).WillByDefault(Return(espnow::NodeState::OPERATIONAL));
         ON_CALL(hal_timer_, get_time_us()).WillByDefault(Return(3600000000LL)); // 3600s = 1 hr
 
         PumpStateSnapshot default_snapshot{
@@ -214,4 +215,37 @@ TEST_F(PumpStatusReporterTest, ExplicitNotifyStateChangeUpdatesHeartbeatState)
     EXPECT_CALL(espnow_, send_data(_, _, _, _, true)).WillOnce(Return(ESP_OK));
 
     sut_->notify_state_change();
+}
+
+TEST_F(PumpStatusReporterTest, NonOperationalNodeQueuesStateChangeAndDispatchesImmediatelyWhenOperational)
+{
+    // 1. When node is in RECOVERY_SCAN (not OPERATIONAL), state change is queued without sending
+    EXPECT_CALL(espnow_, get_node_state()).WillRepeatedly(Return(espnow::NodeState::RECOVERY_SCAN));
+    EXPECT_CALL(state_machine_, consume_state_changed()).WillOnce(Return(true));
+    EXPECT_CALL(espnow_, send_data(_, _, _, _, _)).Times(0);
+
+    sut_->tick(50);
+
+    // 2. Further ticks in IDLE (waiting for backoff) still do not send
+    EXPECT_CALL(espnow_, get_node_state()).WillRepeatedly(Return(espnow::NodeState::IDLE));
+    EXPECT_CALL(state_machine_, consume_state_changed()).WillRepeatedly(Return(false));
+    EXPECT_CALL(espnow_, send_data(_, _, _, _, _)).Times(0);
+
+    sut_->tick(1000);
+    sut_->tick(1000);
+
+    // 3. Node transitions back to OPERATIONAL -> pending report is immediately dispatched on next tick
+    EXPECT_CALL(espnow_, get_node_state()).WillRepeatedly(Return(espnow::NodeState::OPERATIONAL));
+    EXPECT_CALL(espnow_, send_data(_, _, _, _, true)).WillOnce(Return(ESP_OK));
+
+    sut_->tick(50);
+}
+
+TEST_F(PumpStatusReporterTest, NonOperationalNodeSuppressesPeriodicReportsWhenRunning)
+{
+    // Node is in IDLE state (offline), running report timer expires -> should not send
+    EXPECT_CALL(espnow_, get_node_state()).WillRepeatedly(Return(espnow::NodeState::IDLE));
+    EXPECT_CALL(espnow_, send_data(_, _, _, _, _)).Times(0);
+
+    sut_->tick(6000); // Exceeds 5000ms interval
 }
