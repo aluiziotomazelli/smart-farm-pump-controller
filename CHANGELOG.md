@@ -5,6 +5,30 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.0] - 2026-08-20
+
+### Added
+- **Dedicated Display Task (`TankStripDisplay`)**: Autonomous FreeRTOS background task (Priority 2, 20 FPS / 50 ms) for WS2812B addressable LED strip rendering with clean resource deallocation on stop and destructor.
+- **Thread-Safe Display Queue**: Non-blocking message queue (`display_queue_`) for all public display API calls (`set_level`, `update_state`, `set_override_pattern`, `set_brightness`, `clear`), ensuring zero contention with the main control task and continuous animations during blocking operations (WiFi, OTA download).
+- **HMI Redesign (3-Position Selector & Action Button)**:
+  - 3-position switch input mapping (`PIN_SWITCH_SOLAR`, `PIN_SWITCH_GRID`, center = `AUTO`) with mechanical conflict resolution favoring Grid.
+  - Action pushbutton triggering operator start/stop in `SOURCE_LOCKED` modes, or dispatching `FILL_REQUEST` (0x07) to the Central Hub in `AUTO` mode.
+- **Semantic Color Palette**: Centralized color definitions (`HUE_SOLAR`, `HUE_GRID`, `HUE_FILL`, `HUE_OTA`, `HUE_BOOT_SUCCESS`, `HUE_BOOT_ERROR`, `HUE_TIMEOUT`, `HUE_FAULT`).
+- **Dynamic Animation Patterns**:
+  - `IDLE (AUTO)`: Water level in Cyan with soft breathing pulsation on incoming telemetry.
+  - `IDLE (SOURCE_LOCKED)`: Water level in Cyan with top LED highlighted in Green (`HUE_SOLAR`) or Red (`HUE_GRID`).
+  - `RUNNING (AUTO)`: Cyan base with Green/Red chasing LED upwards.
+  - `RUNNING (Manual)`: High-visibility solid color bar with chasing LED.
+  - `OTA_UPDATING`: Purple Knight Rider scanner running uninterrupted throughout the download.
+  - `BOOT_SUCCESS` & `BOOT_ERROR`: Green progressive self-test sweep and Red SOS triple-flash.
+- **Enhanced Boot Health Verification**: Integrated health checks in `PumpController::init()` covering both OTA pending confirmation and normal boot subsystem validity.
+- **CI / Linux Host Decoupling**: Standalone fallback types in `i_hal_led_strip.hpp` allowing headless CI and Linux testing without downloading real hardware drivers.
+- **Extended Test Suite**: Expanded host testing to **94 unit tests** across 7 test projects with 100% pass rate.
+
+### Changed
+- Removed deprecated `display_.tick(delta_ms)` polling from `PumpController::tick()` and `process_pending_ota()`.
+- Initialized and started `TankStripDisplay` task during `PumpController::init()` for immediate boot feedback.
+
 ## [0.1.0] - 2026-08-18
 
 ### Added
