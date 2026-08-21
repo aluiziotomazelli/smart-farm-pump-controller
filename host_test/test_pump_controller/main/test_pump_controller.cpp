@@ -70,11 +70,16 @@ protected:
 
         ON_CALL(btn_trigger_, arm(_)).WillByDefault(Return(ESP_OK));
 
+        ON_CALL(time_manager_, init(_)).WillByDefault(Return(ESP_OK));
+        ON_CALL(time_manager_, is_synchronized()).WillByDefault(Return(false));
+        ON_CALL(time_manager_, get_timestamp_sec()).WillByDefault(Return(0));
+
         ON_CALL(state_machine_, init()).WillByDefault(Return(ESP_OK));
         ON_CALL(status_reporter_, init()).WillByDefault(Return(ESP_OK));
         ON_CALL(display_, init()).WillByDefault(Return(ESP_OK));
         ON_CALL(display_, start()).WillByDefault(Return(ESP_OK));
         ON_CALL(display_, stop()).WillByDefault(Return());
+        ON_CALL(display_, set_brightness(_)).WillByDefault(Return());
         ON_CALL(switch_solar_, init()).WillByDefault(Return(ESP_OK));
         ON_CALL(switch_grid_, init()).WillByDefault(Return(ESP_OK));
         ON_CALL(button_action_, init()).WillByDefault(Return(ESP_OK));
@@ -111,6 +116,7 @@ protected:
             switch_solar_,
             switch_grid_,
             button_action_,
+            time_manager_,
             mock_wifi_,
             mock_ota_,
             btn_trigger_,
@@ -132,10 +138,12 @@ TEST_F(PumpControllerTest, InitInitializesAllSubsystemsAndStorage)
     EXPECT_CALL(btn_trigger_, arm(_)).WillOnce(Return(ESP_OK));
     EXPECT_CALL(espnow_, init(::testing::Field(&espnow::EspNowConfig::node_id, static_cast<espnow::NodeId>(farm::NodeId::PUMP_CONTROL))))
         .WillOnce(Return(ESP_OK));
+    EXPECT_CALL(time_manager_, init(_)).WillOnce(Return(ESP_OK));
     EXPECT_CALL(state_machine_, init()).WillOnce(Return(ESP_OK));
     EXPECT_CALL(status_reporter_, init()).WillOnce(Return(ESP_OK));
     EXPECT_CALL(display_, init()).WillOnce(Return(ESP_OK));
     EXPECT_CALL(display_, start()).WillOnce(Return(ESP_OK));
+    EXPECT_CALL(display_, set_brightness(50)).Times(1);
     EXPECT_CALL(switch_solar_, init()).WillOnce(Return(ESP_OK));
     EXPECT_CALL(switch_grid_, init()).WillOnce(Return(ESP_OK));
     EXPECT_CALL(button_action_, init()).WillOnce(Return(ESP_OK));
@@ -174,6 +182,16 @@ TEST_F(PumpControllerTest, InitPendingVerifyRollbackTriggersReboot)
 TEST_F(PumpControllerTest, InitNormalBootUnhealthySetsBootErrorAndFails)
 {
     EXPECT_CALL(mock_wifi_, init(_)).WillOnce(Return(ESP_FAIL)); // Marks session_healthy = false
+    EXPECT_CALL(mock_ota_, check_pending_verify()).WillOnce(Return(false));
+    EXPECT_CALL(display_, set_override_pattern(TankStripPattern::BOOT_ERROR)).Times(1);
+    EXPECT_CALL(hal_rtos_, task_delay(_)).Times(::testing::AtLeast(1));
+
+    EXPECT_EQ(sut_->init(), ESP_FAIL);
+}
+
+TEST_F(PumpControllerTest, InitTimeManagerFailureMarksSessionUnhealthy)
+{
+    EXPECT_CALL(time_manager_, init(_)).WillOnce(Return(ESP_FAIL)); // Marks session_healthy = false
     EXPECT_CALL(mock_ota_, check_pending_verify()).WillOnce(Return(false));
     EXPECT_CALL(display_, set_override_pattern(TankStripPattern::BOOT_ERROR)).Times(1);
     EXPECT_CALL(hal_rtos_, task_delay(_)).Times(::testing::AtLeast(1));
@@ -437,4 +455,52 @@ TEST_F(PumpControllerTest, TickRuntimeAccountingIncrementsHourmeter)
     EXPECT_EQ(sut_->get_stats().total_runtime_s, 1);
     EXPECT_EQ(sut_->get_stats().solar_runtime_s, 1);
     EXPECT_EQ(sut_->get_stats().grid_runtime_s, 0);
+}
+
+static time_t make_test_time(int hour)
+{
+    struct tm t = {};
+    t.tm_year = 126; // 2026
+    t.tm_mon = 7;    // August
+    t.tm_mday = 20;
+    t.tm_hour = hour;
+    t.tm_min = 30;
+    t.tm_sec = 0;
+    return mktime(&t);
+}
+
+TEST_F(PumpControllerTest, TickUpdatesDisplayBrightnessToDayWhenSynchronized)
+{
+    EXPECT_CALL(time_manager_, is_synchronized()).WillRepeatedly(Return(true));
+    EXPECT_CALL(time_manager_, get_timestamp_sec()).WillRepeatedly(Return(make_test_time(12))); // 12:30 (Day)
+
+    EXPECT_CALL(display_, set_brightness(180)).Times(1);
+    sut_->tick(10000); // 10s check interval
+}
+
+TEST_F(PumpControllerTest, TickUpdatesDisplayBrightnessToTwilightWhenSynchronized)
+{
+    EXPECT_CALL(time_manager_, is_synchronized()).WillRepeatedly(Return(true));
+    EXPECT_CALL(time_manager_, get_timestamp_sec()).WillRepeatedly(Return(make_test_time(19))); // 19:30 (Twilight)
+
+    EXPECT_CALL(display_, set_brightness(30)).Times(1);
+    sut_->tick(10000);
+}
+
+TEST_F(PumpControllerTest, TickUpdatesDisplayBrightnessToNightWhenSynchronized)
+{
+    EXPECT_CALL(time_manager_, is_synchronized()).WillRepeatedly(Return(true));
+    EXPECT_CALL(time_manager_, get_timestamp_sec()).WillRepeatedly(Return(make_test_time(23))); // 23:30 (Night)
+
+    EXPECT_CALL(display_, set_brightness(20)).Times(1);
+    sut_->tick(10000);
+}
+
+TEST_F(PumpControllerTest, TickMaintainsDefaultBrightnessWhenUnsynchronized)
+{
+    EXPECT_CALL(time_manager_, is_synchronized()).WillRepeatedly(Return(false));
+
+    // When unsynced, target is 50
+    EXPECT_CALL(display_, set_brightness(50)).Times(1);
+    sut_->tick(10000);
 }

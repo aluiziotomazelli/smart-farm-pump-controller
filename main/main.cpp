@@ -183,6 +183,7 @@ extern "C" void app_main()
         switch_solar,
         switch_grid,
         button_action,
+        time_mgr,
         wifi,
         ota_controller,
         btn_trigger,
