@@ -17,10 +17,12 @@ PumpStatusReporter::PumpStatusReporter(
     espnow::IEspNowManager& espnow,
     IPumpStateMachine& state_machine,
     idf_hals::ITimerHAL& hal_timer,
+    time_manager::ITimeManager& time_manager,
     const PumpStatusReporterConfig& config)
     : espnow_(espnow)
     , state_machine_(state_machine)
     , hal_timer_(hal_timer)
+    , time_manager_(time_manager)
     , config_(config)
 {
 }
@@ -51,6 +53,7 @@ farm::LoadControlStatus PumpStatusReporter::build_status_payload() const
     status.power_w = snapshot.power_w;
     status.runtime_s = snapshot.runtime_s;
     status.uptime_s = uptime_s;
+    status.unix_time = time_manager_.is_synchronized() ? time_manager_.get_timestamp_ms() : 0;
 
     return status;
 }

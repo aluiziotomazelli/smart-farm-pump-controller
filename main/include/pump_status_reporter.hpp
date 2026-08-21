@@ -6,6 +6,7 @@
 #include "interfaces/i_pump_status_reporter.hpp"
 #include "interfaces/i_espnow_manager.hpp"
 #include "interfaces/i_pump_state_machine.hpp"
+#include "interfaces/i_time_manager.hpp"
 #include "interfaces/i_hal_timer.hpp"
 #include "pump_types.hpp"
 
@@ -20,6 +21,7 @@ public:
         espnow::IEspNowManager& espnow,
         IPumpStateMachine& state_machine,
         idf_hals::ITimerHAL& hal_timer,
+        time_manager::ITimeManager& time_manager,
         const PumpStatusReporterConfig& config = PumpStatusReporterConfig{});
 
     ~PumpStatusReporter() override = default;
@@ -42,6 +44,7 @@ private:
     espnow::IEspNowManager& espnow_;
     IPumpStateMachine& state_machine_;
     idf_hals::ITimerHAL& hal_timer_;
+    time_manager::ITimeManager& time_manager_;
     PumpStatusReporterConfig config_;
 
     uint32_t elapsed_since_last_send_ms_{0};

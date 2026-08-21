@@ -16,10 +16,14 @@ idf_component_register(
         "../../../components/smart-farm-common/include/interfaces"
         "../../../components/espnow_manager/include"
         "../../../components/espnow_manager/include/interfaces"
+        "../../../components/time_manager/include"
+        "../../../components/time_manager/include/interfaces"
+        "../../../components/time_manager/host_test/mocks"
     REQUIRES 
         gtest
         smart-farm-common
         espnow_manager
+        time_manager
         idf_hals
         WHOLE_ARCHIVE
 )

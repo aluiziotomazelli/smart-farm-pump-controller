@@ -143,7 +143,6 @@ TEST_F(PumpControllerTest, InitInitializesAllSubsystemsAndStorage)
     EXPECT_CALL(status_reporter_, init()).WillOnce(Return(ESP_OK));
     EXPECT_CALL(display_, init()).WillOnce(Return(ESP_OK));
     EXPECT_CALL(display_, start()).WillOnce(Return(ESP_OK));
-    EXPECT_CALL(display_, set_brightness(50)).Times(1);
     EXPECT_CALL(switch_solar_, init()).WillOnce(Return(ESP_OK));
     EXPECT_CALL(switch_grid_, init()).WillOnce(Return(ESP_OK));
     EXPECT_CALL(button_action_, init()).WillOnce(Return(ESP_OK));
@@ -500,7 +499,7 @@ TEST_F(PumpControllerTest, TickMaintainsDefaultBrightnessWhenUnsynchronized)
 {
     EXPECT_CALL(time_manager_, is_synchronized()).WillRepeatedly(Return(false));
 
-    // When unsynced, target is 50
-    EXPECT_CALL(display_, set_brightness(50)).Times(1);
+    // When unsynced, display stays on its hardware default; set_brightness is not invoked
+    EXPECT_CALL(display_, set_brightness(_)).Times(0);
     sut_->tick(10000);
 }

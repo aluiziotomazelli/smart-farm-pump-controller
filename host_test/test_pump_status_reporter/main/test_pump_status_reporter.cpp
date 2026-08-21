@@ -8,6 +8,7 @@
 #include "mock_espnow_manager.hpp"
 #include "mock_pump_state_machine.hpp"
 #include "mock_hal_timer.hpp"
+#include "mock_time_manager.hpp"
 #include "farm_protocol_types.hpp"
 
 using ::testing::_;
@@ -22,6 +23,7 @@ protected:
     NiceMock<espnow::MockEspNowManager> espnow_;
     NiceMock<MockPumpStateMachine> state_machine_;
     NiceMock<idf_hals::MockTimerHAL> hal_timer_;
+    NiceMock<time_manager::MockTimeManager> time_manager_;
     PumpStatusReporterConfig config_{
         .circuit_id = 0,
         .running_report_interval_ms = 5000,
@@ -35,6 +37,8 @@ protected:
         ON_CALL(espnow_, send_data(_, _, _, _, _)).WillByDefault(Return(ESP_OK));
         ON_CALL(espnow_, get_node_state()).WillByDefault(Return(espnow::NodeState::OPERATIONAL));
         ON_CALL(hal_timer_, get_time_us()).WillByDefault(Return(3600000000LL)); // 3600s = 1 hr
+        ON_CALL(time_manager_, is_synchronized()).WillByDefault(Return(false));
+        ON_CALL(time_manager_, get_timestamp_ms()).WillByDefault(Return(0));
 
         PumpStateSnapshot default_snapshot{
             .state = farm::LoadState::RUNNING,
@@ -47,7 +51,7 @@ protected:
         ON_CALL(state_machine_, get_snapshot()).WillByDefault(Return(default_snapshot));
         ON_CALL(state_machine_, consume_state_changed()).WillByDefault(Return(false));
 
-        sut_ = std::make_unique<PumpStatusReporter>(espnow_, state_machine_, hal_timer_, config_);
+        sut_ = std::make_unique<PumpStatusReporter>(espnow_, state_machine_, hal_timer_, time_manager_, config_);
     }
 };
 
@@ -82,6 +86,7 @@ TEST_F(PumpStatusReporterTest, SendStatusReportFormatsAndTransmitsPayload)
     EXPECT_EQ(captured_status.power_w, 320);
     EXPECT_EQ(captured_status.runtime_s, 120);
     EXPECT_EQ(captured_status.uptime_s, 3600);
+    EXPECT_EQ(captured_status.unix_time, 0);
 }
 
 TEST_F(PumpStatusReporterTest, RunningTickTriggersPeriodicSendWithoutAckWhenRunning)
@@ -248,4 +253,35 @@ TEST_F(PumpStatusReporterTest, NonOperationalNodeSuppressesPeriodicReportsWhenRu
     EXPECT_CALL(espnow_, send_data(_, _, _, _, _)).Times(0);
 
     sut_->tick(6000); // Exceeds 5000ms interval
+}
+
+TEST_F(PumpStatusReporterTest, SendStatusReportPopulatesUnixTimeWhenTimeManagerSynchronized)
+{
+    EXPECT_CALL(time_manager_, is_synchronized()).WillRepeatedly(Return(true));
+    EXPECT_CALL(time_manager_, get_timestamp_ms()).WillRepeatedly(Return(1710000000000ULL));
+
+    farm::LoadControlStatus captured_status{};
+    EXPECT_CALL(espnow_, send_data(_, _, _, sizeof(farm::LoadControlStatus), false))
+        .WillOnce([&captured_status](espnow::NodeId, espnow::PayloadType, const void* payload, size_t len, bool) {
+            std::memcpy(&captured_status, payload, len);
+            return ESP_OK;
+        });
+
+    EXPECT_EQ(sut_->send_status_report(false), ESP_OK);
+    EXPECT_EQ(captured_status.unix_time, 1710000000000ULL);
+}
+
+TEST_F(PumpStatusReporterTest, SendStatusReportSetsUnixTimeToZeroWhenNotSynchronized)
+{
+    EXPECT_CALL(time_manager_, is_synchronized()).WillRepeatedly(Return(false));
+
+    farm::LoadControlStatus captured_status{};
+    EXPECT_CALL(espnow_, send_data(_, _, _, sizeof(farm::LoadControlStatus), false))
+        .WillOnce([&captured_status](espnow::NodeId, espnow::PayloadType, const void* payload, size_t len, bool) {
+            std::memcpy(&captured_status, payload, len);
+            return ESP_OK;
+        });
+
+    EXPECT_EQ(sut_->send_status_report(false), ESP_OK);
+    EXPECT_EQ(captured_status.unix_time, 0);
 }

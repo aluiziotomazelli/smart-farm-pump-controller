@@ -582,6 +582,10 @@ esp_err_t PumpController::send_fill_request()
 
 void PumpController::update_display_brightness(uint32_t delta_ms)
 {
+    if (!time_manager_.is_synchronized()) {
+        return;
+    }
+
     brightness_check_accumulator_ms_ += delta_ms;
     static constexpr uint32_t BRIGHTNESS_CHECK_PERIOD_MS = 10000; // Check every 10 seconds
     if (delta_ms > 0 && brightness_check_accumulator_ms_ < BRIGHTNESS_CHECK_PERIOD_MS) {
@@ -592,34 +596,23 @@ void PumpController::update_display_brightness(uint32_t delta_ms)
     static constexpr uint8_t BRIGHTNESS_DAY = 180;        // 06:00 to 18:00
     static constexpr uint8_t BRIGHTNESS_TWILIGHT = 30;    // 18:00 to 22:00
     static constexpr uint8_t BRIGHTNESS_NIGHT = 20;       // 22:00 to 06:00
-    static constexpr uint8_t BRIGHTNESS_UNSYNCED = 50;    // Default when time is not synchronized
 
-    uint8_t target_brightness = BRIGHTNESS_UNSYNCED;
+    time_t now = time_manager_.get_timestamp_sec();
+    struct tm timeinfo;
+    localtime_r(&now, &timeinfo);
 
-    if (time_manager_.is_synchronized()) {
-        time_t now = time_manager_.get_timestamp_sec();
-        struct tm timeinfo;
-        localtime_r(&now, &timeinfo);
-
-        if (timeinfo.tm_hour >= 6 && timeinfo.tm_hour < 18) {
-            target_brightness = BRIGHTNESS_DAY;
-        }
-        else if (timeinfo.tm_hour >= 18 && timeinfo.tm_hour < 22) {
-            target_brightness = BRIGHTNESS_TWILIGHT;
-        }
-        else {
-            target_brightness = BRIGHTNESS_NIGHT;
-        }
+    uint8_t target_brightness = BRIGHTNESS_NIGHT;
+    if (timeinfo.tm_hour >= 6 && timeinfo.tm_hour < 18) {
+        target_brightness = BRIGHTNESS_DAY;
+    }
+    else if (timeinfo.tm_hour >= 18 && timeinfo.tm_hour < 22) {
+        target_brightness = BRIGHTNESS_TWILIGHT;
     }
 
     if (target_brightness != current_display_brightness_) {
         current_display_brightness_ = target_brightness;
         display_.set_brightness(target_brightness);
-        ESP_LOGI(
-            TAG,
-            "Display brightness updated to %u (synced: %s)",
-            target_brightness,
-            time_manager_.is_synchronized() ? "yes" : "no");
+        ESP_LOGI(TAG, "Display brightness updated to %u", target_brightness);
     }
 }
 

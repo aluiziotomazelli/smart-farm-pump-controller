@@ -116,7 +116,8 @@ static PumpStatusReporterConfig reporter_config{
     .running_report_interval_ms = 5000,
     .dest_node_id = farm::NodeId::HUB,
     .require_ack = false};
-static PumpStatusReporter status_reporter{espnow::EspNowManager::instance(), state_machine, hal_timer, reporter_config};
+static PumpStatusReporter
+    status_reporter{espnow::EspNowManager::instance(), state_machine, hal_timer, time_mgr, reporter_config};
 
 // UI Inputs (Switches and Buttons)
 static ui_inputs::SwitchConfig switch_cfg{.debounce_ms = 50, .enable_internal_pull = true};
