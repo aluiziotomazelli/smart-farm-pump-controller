@@ -73,6 +73,8 @@ protected:
         ON_CALL(state_machine_, init()).WillByDefault(Return(ESP_OK));
         ON_CALL(status_reporter_, init()).WillByDefault(Return(ESP_OK));
         ON_CALL(display_, init()).WillByDefault(Return(ESP_OK));
+        ON_CALL(display_, start()).WillByDefault(Return(ESP_OK));
+        ON_CALL(display_, stop()).WillByDefault(Return());
         ON_CALL(switch_solar_, init()).WillByDefault(Return(ESP_OK));
         ON_CALL(switch_grid_, init()).WillByDefault(Return(ESP_OK));
         ON_CALL(button_action_, init()).WillByDefault(Return(ESP_OK));
@@ -133,6 +135,7 @@ TEST_F(PumpControllerTest, InitInitializesAllSubsystemsAndStorage)
     EXPECT_CALL(state_machine_, init()).WillOnce(Return(ESP_OK));
     EXPECT_CALL(status_reporter_, init()).WillOnce(Return(ESP_OK));
     EXPECT_CALL(display_, init()).WillOnce(Return(ESP_OK));
+    EXPECT_CALL(display_, start()).WillOnce(Return(ESP_OK));
     EXPECT_CALL(switch_solar_, init()).WillOnce(Return(ESP_OK));
     EXPECT_CALL(switch_grid_, init()).WillOnce(Return(ESP_OK));
     EXPECT_CALL(button_action_, init()).WillOnce(Return(ESP_OK));
@@ -162,9 +165,18 @@ TEST_F(PumpControllerTest, InitPendingVerifyRollbackTriggersReboot)
     EXPECT_CALL(espnow_, send_data(espnow::ReservedIds::HUB, static_cast<uint8_t>(farm::PayloadType::OTA_STATUS_REPORT), _, _, true))
         .WillOnce(Return(ESP_OK));
     EXPECT_CALL(display_, set_override_pattern(TankStripPattern::BOOT_ERROR)).Times(1);
-    EXPECT_CALL(display_, tick(100)).Times(15);
-    EXPECT_CALL(hal_rtos_, task_delay(_)).Times(::testing::AtLeast(15));
+    EXPECT_CALL(hal_rtos_, task_delay(_)).Times(::testing::AtLeast(1));
     EXPECT_CALL(mock_ota_, rollback_and_reboot()).Times(1);
+
+    EXPECT_EQ(sut_->init(), ESP_FAIL);
+}
+
+TEST_F(PumpControllerTest, InitNormalBootUnhealthySetsBootErrorAndFails)
+{
+    EXPECT_CALL(mock_wifi_, init(_)).WillOnce(Return(ESP_FAIL)); // Marks session_healthy = false
+    EXPECT_CALL(mock_ota_, check_pending_verify()).WillOnce(Return(false));
+    EXPECT_CALL(display_, set_override_pattern(TankStripPattern::BOOT_ERROR)).Times(1);
+    EXPECT_CALL(hal_rtos_, task_delay(_)).Times(::testing::AtLeast(1));
 
     EXPECT_EQ(sut_->init(), ESP_FAIL);
 }
@@ -204,7 +216,6 @@ TEST_F(PumpControllerTest, TickSamplesCenterSwitchAutoModeAndSendsFillRequestOnB
     EXPECT_CALL(state_machine_, tick(50)).Times(1);
     EXPECT_CALL(status_reporter_, tick(50)).Times(1);
     EXPECT_CALL(display_, update_state(farm::LoadState::IDLE, farm::ControlMode::AUTO, farm::PowerSource::UNKNOWN)).Times(1);
-    EXPECT_CALL(display_, tick(50)).Times(1);
 
     sut_->tick(50);
 }

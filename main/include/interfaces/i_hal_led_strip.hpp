@@ -9,8 +9,38 @@
 #include "led_strip.h"
 #include "led_strip_rmt.h"
 #else
-#include "led_strip_types.h"
+#include <cstddef>
+
+typedef struct led_strip_t* led_strip_handle_t;
+
+typedef enum {
+    LED_MODEL_WS2812,
+    LED_MODEL_SK6812,
+    LED_MODEL_WS2816,
+} led_model_t;
+
+typedef enum {
+    LED_STRIP_COLOR_COMPONENT_FMT_GRB,
+    LED_STRIP_COLOR_COMPONENT_FMT_BGR,
+    LED_STRIP_COLOR_COMPONENT_FMT_RGB,
+    LED_STRIP_COLOR_COMPONENT_FMT_GRBW,
+} led_color_component_format_t;
+
+typedef struct {
+    int strip_gpio_num;
+    uint32_t max_leds;
+    led_model_t led_model;
+    led_color_component_format_t color_component_format;
+    struct {
+        uint32_t invert_out: 1;
+    } flags;
+} led_strip_config_t;
+
+#if __has_include("driver/rmt_types.h")
 #include "driver/rmt_types.h"
+#else
+typedef int rmt_clock_source_t;
+#endif
 
 #ifndef RMT_CLK_SRC_DEFAULT
 #define RMT_CLK_SRC_DEFAULT static_cast<rmt_clock_source_t>(0)

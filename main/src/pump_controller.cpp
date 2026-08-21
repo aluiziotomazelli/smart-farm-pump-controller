@@ -128,6 +128,13 @@ esp_err_t PumpController::init()
         return err;
     }
 
+    err = display_.start();
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to start tank display task: %s", esp_err_to_name(err));
+        session_healthy = false;
+        return err;
+    }
+
     err = switch_solar_.init();
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "Failed to init solar switch: %s", esp_err_to_name(err));
@@ -156,7 +163,15 @@ esp_err_t PumpController::init()
     }
 
     // Perform post-boot firmware verification after all subsystems initialized
-    if (!check_firmware_health(session_healthy)) {
+    if (ota_controller_.check_pending_verify()) {
+        if (!check_firmware_health(session_healthy)) {
+            return ESP_FAIL;
+        }
+    }
+
+    if (!session_healthy) {
+        display_.set_override_pattern(TankStripPattern::BOOT_ERROR);
+        hal_rtos_.task_delay(pdMS_TO_TICKS(500));
         return ESP_FAIL;
     }
 
@@ -194,7 +209,7 @@ void PumpController::stop()
         task_handle_ = nullptr;
     }
     btn_trigger_.disarm();
-    display_.clear();
+    display_.stop();
     ESP_LOGI(TAG, "PumpController stopped");
 }
 
@@ -238,7 +253,10 @@ void PumpController::tick(uint32_t delta_ms)
             state_machine_.handle_operator_stop();
         }
         else if (locked_source != farm::PowerSource::UNKNOWN) {
-            ESP_LOGI(TAG, "Operator Action: Pump is IDLE with source %d locked -> START triggered", static_cast<int>(locked_source));
+            ESP_LOGI(
+                TAG,
+                "Operator Action: Pump is IDLE with source %d locked -> START triggered",
+                static_cast<int>(locked_source));
             esp_err_t start_err = state_machine_.handle_operator_start(locked_source);
             if (start_err == ESP_OK) {
                 stats_.manual_starts_total++;
@@ -280,7 +298,6 @@ void PumpController::tick(uint32_t delta_ms)
     // 5. Update Visual Feedback on Addressable Strip & Runtime Accounting
     auto snapshot = state_machine_.get_snapshot();
     display_.update_state(snapshot.state, snapshot.mode, snapshot.source);
-    display_.tick(delta_ms);
 
     if (snapshot.state == farm::LoadState::RUNNING) {
         runtime_accumulator_ms_ += delta_ms;
@@ -437,10 +454,6 @@ void PumpController::update_running_version()
 
 bool PumpController::check_firmware_health(bool session_healthy)
 {
-    if (!ota_controller_.check_pending_verify()) {
-        return true;
-    }
-
     ESP_LOGI(TAG, "Pending OTA verification detected on boot; confirming firmware...");
     OtaActionResult result = ota_controller_.confirm_firmware(session_healthy);
     send_ota_report(result.exec_result, result.error_code);
@@ -453,10 +466,7 @@ bool PumpController::check_firmware_health(bool session_healthy)
 
     display_.set_override_pattern(TankStripPattern::BOOT_ERROR);
     ESP_LOGE(TAG, "Post-boot OTA verification failed! Triggering rollback and reboot...");
-    for (int i = 0; i < 15; i++) {
-        display_.tick(100);
-        hal_rtos_.task_delay(pdMS_TO_TICKS(100));
-    }
+    hal_rtos_.task_delay(pdMS_TO_TICKS(500));
     ota_controller_.rollback_and_reboot();
     return false;
 }
@@ -474,7 +484,6 @@ void PumpController::process_pending_ota()
 
     // 2. Visual feedback on addressable strip
     display_.set_override_pattern(TankStripPattern::OTA_UPDATING);
-    display_.tick(0);
 
     // 3. Connect to WiFi with sync retries
     ESP_LOGI(TAG, "Connecting to WiFi for OTA download (timeout: 15000 ms, max_retries: 3)...");
@@ -549,11 +558,7 @@ esp_err_t PumpController::send_fill_request()
 
     ESP_LOGI(TAG, "Sending FILL_REQUEST to Hub (circuit %u)", req.circuit_id);
     return espnow_.send_data(
-        espnow::ReservedIds::HUB,
-        static_cast<uint8_t>(farm::PayloadType::FILL_REQUEST),
-        &req,
-        sizeof(req),
-        true);
+        espnow::ReservedIds::HUB, static_cast<uint8_t>(farm::PayloadType::FILL_REQUEST), &req, sizeof(req), true);
 }
 
 void PumpController::task_entry(void* arg)
