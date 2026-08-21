@@ -36,8 +36,8 @@ public:
         PumpCommandHandler& command_handler,
         IPumpStatusReporter& status_reporter,
         ITankStripDisplay& display,
-        ui_inputs::ISwitch& switch_mode,
-        ui_inputs::ISwitch& switch_source,
+        ui_inputs::ISwitch& switch_solar,
+        ui_inputs::ISwitch& switch_grid,
         ui_inputs::IButton& button_action,
         wifi_manager::IWiFiManager& wifi_manager,
         IOtaController& ota_controller,
@@ -85,8 +85,8 @@ private:
     PumpCommandHandler& command_handler_;
     IPumpStatusReporter& status_reporter_;
     ITankStripDisplay& display_;
-    ui_inputs::ISwitch& switch_mode_;
-    ui_inputs::ISwitch& switch_source_;
+    ui_inputs::ISwitch& switch_solar_;
+    ui_inputs::ISwitch& switch_grid_;
     ui_inputs::IButton& button_action_;
     wifi_manager::IWiFiManager& wifi_manager_;
     IOtaController& ota_controller_;
@@ -117,6 +117,7 @@ private:
 
     void process_pending_ota();
     esp_err_t send_ota_report(farm::OtaExecResult result, farm::OtaErrorCode error_code);
+    esp_err_t send_fill_request();
 
     static void task_entry(void* arg);
     void run_task();

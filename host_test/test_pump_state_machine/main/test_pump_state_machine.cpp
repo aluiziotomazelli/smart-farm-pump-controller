@@ -1,4 +1,3 @@
-// host_test/test_pump_state_machine/main/test_pump_state_machine.cpp
 #include <gtest/gtest.h>
 #include <gmock/gmock.h>
 #include <memory>
@@ -16,7 +15,7 @@ class PumpStateMachineTest : public ::testing::Test
 protected:
     NiceMock<MockContactorController> contactor_;
     NiceMock<MockOutputMonitor> monitor_;
-    PumpStateMachineConfig config_{.default_watchdog_s = 60, .enable_output_validation = false};
+    PumpStateMachineConfig config_{.default_watchdog_s = 60, .enable_output_validation = false, .nominal_power_w = 320};
     std::unique_ptr<PumpStateMachine> sut_;
 
     void SetUp() override
@@ -36,7 +35,9 @@ TEST_F(PumpStateMachineTest, InitialStateIsIdleInAutoMode)
     EXPECT_EQ(sut_->get_state(), farm::LoadState::IDLE);
     EXPECT_EQ(sut_->get_control_mode(), farm::ControlMode::AUTO);
     EXPECT_EQ(sut_->get_active_source(), farm::PowerSource::UNKNOWN);
+    EXPECT_EQ(sut_->get_locked_source(), farm::PowerSource::UNKNOWN);
     EXPECT_EQ(sut_->get_runtime_s(), 0);
+    EXPECT_EQ(sut_->get_snapshot().power_w, 0);
 }
 
 TEST_F(PumpStateMachineTest, InitInitializesHardwareAndDeactivatesContactor)
@@ -60,6 +61,7 @@ TEST_F(PumpStateMachineTest, AutoModeLoadOnActivatesContactorAndTransitionsToRun
     EXPECT_EQ(sut_->handle_load_on(cmd), ESP_OK);
     EXPECT_EQ(sut_->get_state(), farm::LoadState::RUNNING);
     EXPECT_EQ(sut_->get_active_source(), farm::PowerSource::SOLAR);
+    EXPECT_EQ(sut_->get_snapshot().power_w, 320);
     EXPECT_TRUE(sut_->consume_state_changed());
     EXPECT_FALSE(sut_->consume_state_changed()); // Cleared
 }
@@ -123,6 +125,7 @@ TEST_F(PumpStateMachineTest, AutoModeLoadOffDeactivatesContactorAndReturnsToIdle
     EXPECT_EQ(sut_->handle_load_off(off_cmd), ESP_OK);
     EXPECT_EQ(sut_->get_state(), farm::LoadState::IDLE);
     EXPECT_EQ(sut_->get_active_source(), farm::PowerSource::UNKNOWN);
+    EXPECT_EQ(sut_->get_snapshot().power_w, 0);
     EXPECT_TRUE(sut_->consume_state_changed());
 }
 
@@ -142,6 +145,7 @@ TEST_F(PumpStateMachineTest, WatchdogExpiryTransitionsToErrorTimeout)
 
     EXPECT_EQ(sut_->get_state(), farm::LoadState::ERROR_TIMEOUT);
     EXPECT_EQ(sut_->get_active_source(), farm::PowerSource::UNKNOWN);
+    EXPECT_EQ(sut_->get_snapshot().power_w, 0);
     EXPECT_TRUE(sut_->consume_state_changed());
 }
 
@@ -166,38 +170,122 @@ TEST_F(PumpStateMachineTest, ErrorTimeoutRecoversWithFreshLoadOn)
     EXPECT_EQ(sut_->get_active_source(), farm::PowerSource::GRID);
 }
 
-TEST_F(PumpStateMachineTest, ManualModeRejectsRemoteLoadCommands)
+TEST_F(PumpStateMachineTest, SourceLockEnforcesSourceLockedModeAndLocksLoadOnSource)
 {
-    sut_->set_control_mode(farm::ControlMode::MANUAL);
-    EXPECT_EQ(sut_->get_control_mode(), farm::ControlMode::MANUAL);
+    sut_->set_source_lock(farm::PowerSource::SOLAR);
+    EXPECT_EQ(sut_->get_control_mode(), farm::ControlMode::SOURCE_LOCKED);
+    EXPECT_EQ(sut_->get_locked_source(), farm::PowerSource::SOLAR);
+    EXPECT_EQ(sut_->get_active_source(), farm::PowerSource::SOLAR);
 
+    // Hub sends LOAD_ON requesting GRID, but pump locks and activates SOLAR
     farm::LoadOnCommand on_cmd{
         .circuit_id = 0,
         .power_source = farm::PowerSource::GRID,
         .watchdog_timeout_s = 60};
-    EXPECT_EQ(sut_->handle_load_on(on_cmd), ESP_ERR_INVALID_STATE);
-
-    farm::LoadOffCommand off_cmd{.circuit_id = 0};
-    EXPECT_EQ(sut_->handle_load_off(off_cmd), ESP_ERR_INVALID_STATE);
-}
-
-TEST_F(PumpStateMachineTest, ManualStartAndStopInManualMode)
-{
-    sut_->set_control_mode(farm::ControlMode::MANUAL);
-
     EXPECT_CALL(contactor_, activate(farm::PowerSource::SOLAR)).WillOnce(Return(ESP_OK));
-    EXPECT_EQ(sut_->handle_manual_start(farm::PowerSource::SOLAR), ESP_OK);
+
+    EXPECT_EQ(sut_->handle_load_on(on_cmd), ESP_OK);
     EXPECT_EQ(sut_->get_state(), farm::LoadState::RUNNING);
     EXPECT_EQ(sut_->get_active_source(), farm::PowerSource::SOLAR);
+}
+
+TEST_F(PumpStateMachineTest, OperatorStartTransitionsToStopOverrideMode)
+{
+    EXPECT_CALL(contactor_, activate(farm::PowerSource::SOLAR)).WillOnce(Return(ESP_OK));
+    EXPECT_EQ(sut_->handle_operator_start(farm::PowerSource::SOLAR), ESP_OK);
+    EXPECT_EQ(sut_->get_state(), farm::LoadState::RUNNING);
+    EXPECT_EQ(sut_->get_control_mode(), farm::ControlMode::STOP_OVERRIDE);
+    EXPECT_EQ(sut_->get_active_source(), farm::PowerSource::SOLAR);
+    EXPECT_EQ(sut_->get_snapshot().power_w, 320);
 
     EXPECT_CALL(contactor_, deactivate()).WillOnce(Return(ESP_OK));
-    EXPECT_EQ(sut_->handle_manual_stop(), ESP_OK);
+    EXPECT_EQ(sut_->handle_operator_stop(), ESP_OK);
+    EXPECT_EQ(sut_->get_state(), farm::LoadState::IDLE);
+    EXPECT_EQ(sut_->get_control_mode(), farm::ControlMode::AUTO);
+}
+
+TEST_F(PumpStateMachineTest, StopOverrideRejectsLoadOnButAcceptsLoadOffFromHub)
+{
+    EXPECT_CALL(contactor_, activate(farm::PowerSource::GRID)).WillOnce(Return(ESP_OK));
+    EXPECT_EQ(sut_->handle_operator_start(farm::PowerSource::GRID), ESP_OK);
+    EXPECT_EQ(sut_->get_control_mode(), farm::ControlMode::STOP_OVERRIDE);
+
+    // Hub tries to send LOAD_ON -> rejected
+    farm::LoadOnCommand on_cmd{
+        .circuit_id = 0,
+        .power_source = farm::PowerSource::SOLAR,
+        .watchdog_timeout_s = 60};
+    EXPECT_EQ(sut_->handle_load_on(on_cmd), ESP_ERR_INVALID_STATE);
+
+    // Hub sends LOAD_OFF -> accepted!
+    farm::LoadOffCommand off_cmd{.circuit_id = 0};
+    EXPECT_CALL(contactor_, deactivate()).WillOnce(Return(ESP_OK));
+    EXPECT_EQ(sut_->handle_load_off(off_cmd), ESP_OK);
     EXPECT_EQ(sut_->get_state(), farm::LoadState::IDLE);
 }
 
-TEST_F(PumpStateMachineTest, ManualStartFailsInAutoMode)
+TEST_F(PumpStateMachineTest, HotSwitchFromSolarToGridWhileRunningOnHubCycle)
 {
-    EXPECT_EQ(sut_->handle_manual_start(farm::PowerSource::SOLAR), ESP_ERR_INVALID_STATE);
+    // Hub starts on SOLAR
+    farm::LoadOnCommand on_cmd{
+        .circuit_id = 0,
+        .power_source = farm::PowerSource::SOLAR,
+        .watchdog_timeout_s = 100};
+    EXPECT_CALL(contactor_, activate(farm::PowerSource::SOLAR)).WillOnce(Return(ESP_OK));
+    EXPECT_EQ(sut_->handle_load_on(on_cmd), ESP_OK);
+    EXPECT_EQ(sut_->get_control_mode(), farm::ControlMode::AUTO);
+    EXPECT_EQ(sut_->get_active_source(), farm::PowerSource::SOLAR);
+
+    // Operator turns switch to GRID while running
+    EXPECT_CALL(contactor_, activate(farm::PowerSource::GRID)).WillOnce(Return(ESP_OK));
+    sut_->set_source_lock(farm::PowerSource::GRID);
+
+    EXPECT_EQ(sut_->get_control_mode(), farm::ControlMode::SOURCE_LOCKED);
+    EXPECT_EQ(sut_->get_active_source(), farm::PowerSource::GRID);
+    EXPECT_EQ(sut_->get_state(), farm::LoadState::RUNNING);
+
+    // Watchdog continues ticking
+    sut_->tick(10000);
+    EXPECT_EQ(sut_->get_snapshot().remaining_watchdog_s, 90);
+}
+
+TEST_F(PumpStateMachineTest, HotSwitchFromGridToSolarWhileRunningOnHubCycle)
+{
+    // Hub starts on GRID
+    farm::LoadOnCommand on_cmd{
+        .circuit_id = 0,
+        .power_source = farm::PowerSource::GRID,
+        .watchdog_timeout_s = 100};
+    EXPECT_CALL(contactor_, activate(farm::PowerSource::GRID)).WillOnce(Return(ESP_OK));
+    EXPECT_EQ(sut_->handle_load_on(on_cmd), ESP_OK);
+
+    // Operator turns switch to SOLAR while running
+    EXPECT_CALL(contactor_, activate(farm::PowerSource::SOLAR)).WillOnce(Return(ESP_OK));
+    sut_->set_source_lock(farm::PowerSource::SOLAR);
+
+    EXPECT_EQ(sut_->get_control_mode(), farm::ControlMode::SOURCE_LOCKED);
+    EXPECT_EQ(sut_->get_active_source(), farm::PowerSource::SOLAR);
+    EXPECT_EQ(sut_->get_state(), farm::LoadState::RUNNING);
+}
+
+TEST_F(PumpStateMachineTest, SwitchReturnsToCenterWhileRunningMaintainsOperation)
+{
+    // Operator locked to SOLAR and running
+    sut_->set_source_lock(farm::PowerSource::SOLAR);
+    farm::LoadOnCommand on_cmd{
+        .circuit_id = 0,
+        .power_source = farm::PowerSource::SOLAR,
+        .watchdog_timeout_s = 100};
+    EXPECT_CALL(contactor_, activate(farm::PowerSource::SOLAR)).WillOnce(Return(ESP_OK));
+    EXPECT_EQ(sut_->handle_load_on(on_cmd), ESP_OK);
+
+    // Operator returns switch to center (UNKNOWN)
+    EXPECT_CALL(contactor_, activate(_)).Times(0); // Should NOT re-actuate
+    sut_->set_source_lock(farm::PowerSource::UNKNOWN);
+
+    EXPECT_EQ(sut_->get_control_mode(), farm::ControlMode::AUTO);
+    EXPECT_EQ(sut_->get_active_source(), farm::PowerSource::SOLAR);
+    EXPECT_EQ(sut_->get_state(), farm::LoadState::RUNNING);
 }
 
 TEST_F(PumpStateMachineTest, RuntimeAccumulatesOnTickWhenRunning)

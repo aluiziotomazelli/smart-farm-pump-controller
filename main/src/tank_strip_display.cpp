@@ -9,12 +9,15 @@
 
 static const char* TAG = "TankStripDisplay";
 
-// Color Palette Definitions (HSV)
-static constexpr uint16_t HUE_RED = 0;
-static constexpr uint16_t HUE_ORANGE = 30;
-static constexpr uint16_t HUE_GREEN = 120;
-static constexpr uint16_t HUE_CYAN = 180;
-static constexpr uint16_t HUE_PURPLE = 280;
+// Semantic Color Palette Definitions (HSV Hue 0..360)
+static constexpr uint16_t HUE_GRID = 0;          ///< Red (Grid indicator & alert)
+static constexpr uint16_t HUE_TIMEOUT = 30;       ///< Orange (Communication timeout warning)
+static constexpr uint16_t HUE_SOLAR = 120;        ///< Green (Solar indicator & success)
+static constexpr uint16_t HUE_FILL = 180;         ///< Cyan (Water level fill)
+static constexpr uint16_t HUE_OTA = 280;          ///< Purple (OTA update scanner)
+static constexpr uint16_t HUE_BOOT_SUCCESS = 120; ///< Green (Boot success sweep)
+static constexpr uint16_t HUE_BOOT_ERROR = 0;     ///< Red (Boot error SOS)
+static constexpr uint16_t HUE_FAULT = 0;          ///< Red (Hardware fault / stuck contactor)
 
 static constexpr uint8_t SAT_FULL = 255;
 static constexpr uint8_t SAT_CYAN = 240;
@@ -22,8 +25,12 @@ static constexpr uint8_t SAT_CYAN = 240;
 static constexpr uint8_t VAL_FULL = 255;
 static constexpr uint8_t VAL_CYAN = 200;
 
-TankStripDisplay::TankStripDisplay(IHalLedStrip& hal_strip, const TankStripConfig& config)
+TankStripDisplay::TankStripDisplay(
+    IHalLedStrip& hal_strip,
+    idf_hals::IHalFreertos& hal_freertos,
+    const TankStripConfig& config)
     : hal_strip_(hal_strip)
+    , hal_freertos_(hal_freertos)
     , config_(config)
     , brightness_(config.default_brightness)
 {
@@ -31,7 +38,7 @@ TankStripDisplay::TankStripDisplay(IHalLedStrip& hal_strip, const TankStripConfi
 
 TankStripDisplay::~TankStripDisplay()
 {
-    clear();
+    stop();
     if (strip_handle_ != nullptr) {
         hal_strip_.del(strip_handle_);
         strip_handle_ = nullptr;
@@ -64,6 +71,16 @@ esp_err_t TankStripDisplay::init()
         return err;
     }
 
+    if (display_queue_ == nullptr) {
+        display_queue_ = hal_freertos_.queue_create(16, sizeof(DisplayCommand));
+        if (display_queue_ == nullptr) {
+            ESP_LOGE(TAG, "Failed to create display command queue");
+            hal_strip_.del(strip_handle_);
+            strip_handle_ = nullptr;
+            return ESP_ERR_NO_MEM;
+        }
+    }
+
     clear();
     ESP_LOGI(
         TAG,
@@ -73,31 +90,119 @@ esp_err_t TankStripDisplay::init()
     return ESP_OK;
 }
 
+esp_err_t TankStripDisplay::start()
+{
+    if (is_running_) {
+        ESP_LOGW(TAG, "Display task already running");
+        return ESP_OK;
+    }
+
+    if (strip_handle_ == nullptr || display_queue_ == nullptr) {
+        ESP_LOGE(TAG, "Cannot start display task: not initialized");
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    is_running_ = true;
+    BaseType_t ret = hal_freertos_.task_create(
+        task_entry,
+        "strip_disp",
+        3072,
+        this,
+        2, // Low priority for secondary visual display
+        &task_handle_);
+
+    if (ret != pdPASS) {
+        is_running_ = false;
+        task_handle_ = nullptr;
+        ESP_LOGE(TAG, "Failed to create strip_disp task");
+        return ESP_FAIL;
+    }
+
+    ESP_LOGI(TAG, "TankStripDisplay task started (Priority 2, 20 FPS)");
+    return ESP_OK;
+}
+
+void TankStripDisplay::stop()
+{
+    is_running_ = false;
+
+    if (task_handle_ != nullptr) {
+        hal_freertos_.task_delete(task_handle_);
+        task_handle_ = nullptr;
+    }
+
+    if (display_queue_ != nullptr) {
+        hal_freertos_.queue_delete(display_queue_);
+        display_queue_ = nullptr;
+    }
+
+    clear();
+    ESP_LOGI(TAG, "TankStripDisplay stopped and resources deallocated");
+}
+
 void TankStripDisplay::set_level(uint16_t permille)
 {
     if (permille > 1000) {
         permille = 1000;
     }
-    level_permille_ = permille;
 
-    // Trigger soft breathing confirmation cycle on IDLE (600ms single wave)
-    idle_breathe_timer_ms_ = 600;
+    if (display_queue_ != nullptr) {
+        DisplayCommand cmd{};
+        cmd.type = DisplayCmdType::SET_LEVEL;
+        cmd.level_permille = permille;
+        hal_freertos_.queue_send(display_queue_, &cmd, 0);
+    }
+    else {
+        level_permille_ = permille;
+        idle_breathe_timer_ms_ = 600;
+    }
 }
 
 void TankStripDisplay::update_state(farm::LoadState state, farm::ControlMode mode, farm::PowerSource source)
 {
-    state_ = state;
-    mode_ = mode;
-    source_ = source;
+    if (display_queue_ != nullptr) {
+        DisplayCommand cmd{};
+        cmd.type = DisplayCmdType::UPDATE_STATE;
+        cmd.state_data.state = state;
+        cmd.state_data.mode = mode;
+        cmd.state_data.source = source;
+        hal_freertos_.queue_send(display_queue_, &cmd, 0);
+    }
+    else {
+        state_ = state;
+        mode_ = mode;
+        source_ = source;
+    }
 }
 
 void TankStripDisplay::set_override_pattern(TankStripPattern pattern)
 {
-    override_pattern_ = pattern;
-    if (pattern == TankStripPattern::BOOT_SUCCESS) {
-        boot_sweep_idx_ = 0;
-        boot_hold_ms_ = 0;
-        boot_timer_ms_ = 0;
+    if (display_queue_ != nullptr) {
+        DisplayCommand cmd{};
+        cmd.type = DisplayCmdType::SET_OVERRIDE_PATTERN;
+        cmd.pattern = pattern;
+        hal_freertos_.queue_send(display_queue_, &cmd, 0);
+    }
+    else {
+        override_pattern_ = pattern;
+        if (pattern == TankStripPattern::BOOT_SUCCESS) {
+            boot_sweep_idx_ = 0;
+            boot_hold_ms_ = 0;
+            boot_timer_ms_ = 0;
+        }
+    }
+}
+
+void TankStripDisplay::set_brightness(uint8_t brightness)
+{
+    if (display_queue_ != nullptr) {
+        DisplayCommand cmd{};
+        cmd.type = DisplayCmdType::SET_BRIGHTNESS;
+        cmd.brightness = brightness;
+        hal_freertos_.queue_send(display_queue_, &cmd, 0);
+    }
+    else {
+        brightness_ = brightness;
     }
 }
 
@@ -120,7 +225,40 @@ uint32_t TankStripDisplay::calculate_active_leds(uint16_t permille) const
     return active;
 }
 
-void TankStripDisplay::tick(uint32_t delta_ms)
+void TankStripDisplay::process_command(const DisplayCommand& cmd)
+{
+    switch (cmd.type) {
+    case DisplayCmdType::SET_LEVEL:
+        level_permille_ = cmd.level_permille;
+        idle_breathe_timer_ms_ = 600; // Trigger soft breathing confirmation cycle on IDLE
+        break;
+
+    case DisplayCmdType::UPDATE_STATE:
+        state_ = cmd.state_data.state;
+        mode_ = cmd.state_data.mode;
+        source_ = cmd.state_data.source;
+        break;
+
+    case DisplayCmdType::SET_OVERRIDE_PATTERN:
+        override_pattern_ = cmd.pattern;
+        if (cmd.pattern == TankStripPattern::BOOT_SUCCESS) {
+            boot_sweep_idx_ = 0;
+            boot_hold_ms_ = 0;
+            boot_timer_ms_ = 0;
+        }
+        break;
+
+    case DisplayCmdType::SET_BRIGHTNESS:
+        brightness_ = cmd.brightness;
+        break;
+
+    case DisplayCmdType::CLEAR:
+        clear();
+        break;
+    }
+}
+
+void TankStripDisplay::process_frame(uint32_t delta_ms)
 {
     if (strip_handle_ == nullptr || config_.num_leds == 0) {
         return;
@@ -183,6 +321,30 @@ void TankStripDisplay::tick(uint32_t delta_ms)
     hal_strip_.refresh(strip_handle_);
 }
 
+void TankStripDisplay::task_entry(void* param)
+{
+    auto* self = static_cast<TankStripDisplay*>(param);
+    self->run_task();
+}
+
+void TankStripDisplay::run_task()
+{
+    while (is_running_) {
+        // Drains all pending messages
+        if (display_queue_ != nullptr) {
+            DisplayCommand cmd{};
+            while (hal_freertos_.queue_receive(display_queue_, &cmd, 0) == pdTRUE) {
+                process_command(cmd);
+            }
+        }
+
+        // Render frame at 20 FPS (50ms)
+        process_frame(50);
+
+        hal_freertos_.task_delay(pdMS_TO_TICKS(50));
+    }
+}
+
 void TankStripDisplay::render_pixel_hsv(uint32_t index, uint16_t hue, uint8_t saturation, uint8_t value)
 {
     if (index >= config_.num_leds || strip_handle_ == nullptr) {
@@ -198,7 +360,7 @@ void TankStripDisplay::render_auto_pattern()
 
     switch (state_) {
     case farm::LoadState::RUNNING:
-        if (mode_ == farm::ControlMode::MANUAL) {
+        if (mode_ == farm::ControlMode::STOP_OVERRIDE || mode_ == farm::ControlMode::FULL_MANUAL) {
             render_filling_manual(active_leds, source_);
         }
         else {
@@ -214,57 +376,75 @@ void TankStripDisplay::render_auto_pattern()
         break;
     case farm::LoadState::IDLE:
     default:
-        render_idle(active_leds);
+        render_idle(active_leds, mode_, source_);
         break;
     }
 }
 
-void TankStripDisplay::render_timeout(uint32_t active_leds)
+void TankStripDisplay::render_idle(uint32_t active_leds, farm::ControlMode mode, farm::PowerSource source)
 {
-    bool is_on = (error_timer_ms_ % 1000) < 500;
-    uint32_t top_idx = (active_leds > 0) ? (active_leds - 1) : 0;
-
-    for (uint32_t i = 0; i < active_leds; i++) {
-        if (is_on && i == top_idx) {
-            render_pixel_hsv(i, HUE_ORANGE, SAT_FULL, VAL_FULL);
-        }
-        else {
-            render_pixel_hsv(i, HUE_CYAN, SAT_CYAN, VAL_CYAN);
-        }
-    }
-    for (uint32_t i = active_leds; i < config_.num_leds; i++) {
-        render_pixel_hsv(i, 0, 0, 0);
-    }
-}
-
-void TankStripDisplay::render_idle(uint32_t active_leds)
-{
-    uint8_t val = VAL_CYAN;
-
     // Smooth single wave breathing on data update (Value: 100% -> 40% -> 100%)
+    float factor = 1.0f;
     if (idle_breathe_timer_ms_ > 0) {
         float t = static_cast<float>(600 - idle_breathe_timer_ms_) / 600.0f;
-        float wave = 0.4f + 0.6f * 0.5f * (1.0f + std::cos(2.0f * 3.14159265f * t));
-        val = static_cast<uint8_t>(VAL_CYAN * wave);
+        factor = 0.4f + 0.6f * 0.5f * (1.0f + std::cos(2.0f * 3.14159265f * t));
     }
 
-    for (uint32_t i = 0; i < config_.num_leds; i++) {
-        if (i < active_leds) {
-            render_pixel_hsv(i, HUE_CYAN, SAT_CYAN, val);
+    uint8_t val_fill = static_cast<uint8_t>(VAL_CYAN * factor);
+    uint8_t val_full = static_cast<uint8_t>(VAL_FULL * factor);
+
+    if (mode == farm::ControlMode::SOURCE_LOCKED) {
+        uint16_t locked_hue = (source == farm::PowerSource::GRID) ? HUE_GRID : HUE_SOLAR;
+
+        if (active_leds == 0) {
+            // Tank empty with locked source: LED 0 pulses gently in source color
+            render_pixel_hsv(0, locked_hue, SAT_FULL, static_cast<uint8_t>(80 * factor));
+            for (uint32_t i = 1; i < config_.num_leds; i++) {
+                render_pixel_hsv(i, 0, 0, 0);
+            }
         }
         else {
-            render_pixel_hsv(i, 0, 0, 0);
+            // LEDs 0..(active_leds - 2) in Cyan
+            for (uint32_t i = 0; i + 1 < active_leds; i++) {
+                render_pixel_hsv(i, HUE_FILL, SAT_CYAN, val_fill);
+            }
+            // Top active LED in locked source color
+            render_pixel_hsv(active_leds - 1, locked_hue, SAT_FULL, val_full);
+
+            // Remaining LEDs off
+            for (uint32_t i = active_leds; i < config_.num_leds; i++) {
+                render_pixel_hsv(i, 0, 0, 0);
+            }
+        }
+    }
+    else {
+        // Pure AUTO: all active LEDs in Cyan
+        for (uint32_t i = 0; i < config_.num_leds; i++) {
+            if (i < active_leds) {
+                render_pixel_hsv(i, HUE_FILL, SAT_CYAN, val_fill);
+            }
+            else {
+                render_pixel_hsv(i, 0, 0, 0);
+            }
         }
     }
 }
 
 void TankStripDisplay::render_filling_auto(uint32_t active_leds, farm::PowerSource source)
 {
-    uint16_t source_hue = (source == farm::PowerSource::SOLAR) ? HUE_GREEN : HUE_RED;
+    uint16_t source_hue = (source == farm::PowerSource::GRID) ? HUE_GRID : HUE_SOLAR;
 
-    // Render active level base in Cyan
-    for (uint32_t i = 0; i < active_leds; i++) {
-        render_pixel_hsv(i, HUE_CYAN, SAT_CYAN, VAL_CYAN);
+    // Render active level base
+    if (mode_ == farm::ControlMode::SOURCE_LOCKED && active_leds > 0) {
+        for (uint32_t i = 0; i + 1 < active_leds; i++) {
+            render_pixel_hsv(i, HUE_FILL, SAT_CYAN, VAL_CYAN);
+        }
+        render_pixel_hsv(active_leds - 1, source_hue, SAT_FULL, VAL_FULL);
+    }
+    else {
+        for (uint32_t i = 0; i < active_leds; i++) {
+            render_pixel_hsv(i, HUE_FILL, SAT_CYAN, VAL_CYAN);
+        }
     }
 
     // Render upward chase in source color
@@ -291,7 +471,7 @@ void TankStripDisplay::render_filling_auto(uint32_t active_leds, farm::PowerSour
 
 void TankStripDisplay::render_filling_manual(uint32_t active_leds, farm::PowerSource source)
 {
-    uint16_t source_hue = (source == farm::PowerSource::SOLAR) ? HUE_GREEN : HUE_RED;
+    uint16_t source_hue = (source == farm::PowerSource::GRID) ? HUE_GRID : HUE_SOLAR;
 
     // Full active bar solid in source color (Manual warning highlight)
     for (uint32_t i = 0; i < active_leds; i++) {
@@ -320,6 +500,24 @@ void TankStripDisplay::render_filling_manual(uint32_t active_leds, farm::PowerSo
     }
 }
 
+void TankStripDisplay::render_timeout(uint32_t active_leds)
+{
+    bool is_on = (error_timer_ms_ % 1000) < 500;
+    uint32_t top_idx = (active_leds > 0) ? (active_leds - 1) : 0;
+
+    for (uint32_t i = 0; i < active_leds; i++) {
+        if (is_on && i == top_idx) {
+            render_pixel_hsv(i, HUE_TIMEOUT, SAT_FULL, VAL_FULL);
+        }
+        else {
+            render_pixel_hsv(i, HUE_FILL, SAT_CYAN, VAL_CYAN);
+        }
+    }
+    for (uint32_t i = active_leds; i < config_.num_leds; i++) {
+        render_pixel_hsv(i, 0, 0, 0);
+    }
+}
+
 void TankStripDisplay::render_fault(uint32_t active_leds)
 {
     // Fast Red breathing at 2Hz across the entire strip
@@ -328,7 +526,7 @@ void TankStripDisplay::render_fault(uint32_t active_leds)
     uint8_t val = static_cast<uint8_t>(VAL_FULL * intensity);
 
     for (uint32_t i = 0; i < config_.num_leds; i++) {
-        render_pixel_hsv(i, HUE_RED, SAT_FULL, val);
+        render_pixel_hsv(i, HUE_FAULT, SAT_FULL, val);
     }
 }
 
@@ -342,13 +540,13 @@ void TankStripDisplay::render_ota()
     // Purple scanner with tail
     int32_t pos = ota_scan_pos_;
     if (pos >= 0 && pos < static_cast<int32_t>(config_.num_leds)) {
-        render_pixel_hsv(static_cast<uint32_t>(pos), HUE_PURPLE, SAT_FULL, VAL_FULL);
+        render_pixel_hsv(static_cast<uint32_t>(pos), HUE_OTA, SAT_FULL, VAL_FULL);
     }
     if (pos - 1 >= 0 && pos - 1 < static_cast<int32_t>(config_.num_leds)) {
-        render_pixel_hsv(static_cast<uint32_t>(pos - 1), HUE_PURPLE, SAT_FULL, 80);
+        render_pixel_hsv(static_cast<uint32_t>(pos - 1), HUE_OTA, SAT_FULL, 80);
     }
     if (pos + 1 >= 0 && pos + 1 < static_cast<int32_t>(config_.num_leds)) {
-        render_pixel_hsv(static_cast<uint32_t>(pos + 1), HUE_PURPLE, SAT_FULL, 80);
+        render_pixel_hsv(static_cast<uint32_t>(pos + 1), HUE_OTA, SAT_FULL, 80);
     }
 }
 
@@ -372,7 +570,7 @@ void TankStripDisplay::render_boot_success()
 
     for (uint32_t i = 0; i < config_.num_leds; i++) {
         if (i < boot_sweep_idx_) {
-            render_pixel_hsv(i, HUE_CYAN, SAT_FULL, VAL_FULL);
+            render_pixel_hsv(i, HUE_BOOT_SUCCESS, SAT_FULL, VAL_FULL);
         }
         else {
             render_pixel_hsv(i, 0, 0, 0);
@@ -388,7 +586,7 @@ void TankStripDisplay::render_boot_error()
 
     for (uint32_t i = 0; i < config_.num_leds; i++) {
         if (is_on) {
-            render_pixel_hsv(i, HUE_RED, SAT_FULL, VAL_FULL);
+            render_pixel_hsv(i, HUE_BOOT_ERROR, SAT_FULL, VAL_FULL);
         }
         else {
             render_pixel_hsv(i, 0, 0, 0);

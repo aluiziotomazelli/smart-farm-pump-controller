@@ -48,6 +48,7 @@ farm::LoadControlStatus PumpStatusReporter::build_status_payload() const
     status.control_mode = snapshot.mode;
     status.active_power_source = snapshot.source;
     status.load_state = snapshot.state;
+    status.power_w = snapshot.power_w;
     status.runtime_s = snapshot.runtime_s;
     status.uptime_s = uptime_s;
 
@@ -60,11 +61,12 @@ esp_err_t PumpStatusReporter::send_status_report(bool require_ack)
 
     ESP_LOGI(
         TAG,
-        "Sending LOAD_CONTROL_STATUS (ack=%s): state=%d, mode=%d, source=%d, runtime=%lu s, uptime=%lu s",
+        "Sending LOAD_CONTROL_STATUS (ack=%s): state=%d, mode=%d, source=%d, power=%u W, runtime=%lu s, uptime=%lu s",
         require_ack ? "true" : "false",
         static_cast<int>(status.load_state),
         static_cast<int>(status.control_mode),
         static_cast<int>(status.active_power_source),
+        status.power_w,
         status.runtime_s,
         status.uptime_s);
 

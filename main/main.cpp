@@ -47,9 +47,9 @@
 static const char* TAG = "main";
 
 // Pinout mapping for Seeed Studio XIAO ESP32-C3
-static constexpr gpio_num_t PIN_BUTTON_ACTION = GPIO_NUM_2;   // D0
-static constexpr gpio_num_t PIN_SWITCH_MODE = GPIO_NUM_3;     // D1
-static constexpr gpio_num_t PIN_SWITCH_SOURCE = GPIO_NUM_4;   // D2
+static constexpr gpio_num_t PIN_BUTTON_ACTION = GPIO_NUM_2;   // D0 (Push action / Start / Stop / FillRequest)
+static constexpr gpio_num_t PIN_SWITCH_SOLAR = GPIO_NUM_3;    // D1 (3-pos switch: SOLAR position)
+static constexpr gpio_num_t PIN_SWITCH_GRID = GPIO_NUM_4;     // D2 (3-pos switch: GRID position)
 static constexpr gpio_num_t PIN_CONTACTOR_GRID = GPIO_NUM_5;  // D3
 static constexpr gpio_num_t PIN_CONTACTOR_SOLAR = GPIO_NUM_6; // D4
 static constexpr gpio_num_t PIN_LED_STRIP_DATA = GPIO_NUM_7;  // D5 (Addressable WS2812 strip DIN)
@@ -100,13 +100,14 @@ static TankStripConfig strip_cfg{
     .num_leds = 20,
     .default_brightness = 50,
     .rmt_resolution_hz = 10 * 1000 * 1000};
-static TankStripDisplay tank_display{hal_led_strip, strip_cfg};
+static TankStripDisplay tank_display{hal_led_strip, hal_freertos, strip_cfg};
 
 // State Machine
 static PumpStateMachineConfig fsm_config{
     .default_watchdog_s = 3600,
     .demagnetization_delay_ms = 150,
-    .enable_output_validation = false};
+    .enable_output_validation = false,
+    .nominal_power_w = 320};
 static PumpStateMachine state_machine{contactor_ctrl, output_monitor, fsm_config};
 
 // Telemetry Reporter
@@ -119,8 +120,8 @@ static PumpStatusReporter status_reporter{espnow::EspNowManager::instance(), sta
 
 // UI Inputs (Switches and Buttons)
 static ui_inputs::SwitchConfig switch_cfg{.debounce_ms = 50, .enable_internal_pull = true};
-static ui_inputs::Switch switch_mode{hal_gpio, hal_timer, PIN_SWITCH_MODE, true, switch_cfg};
-static ui_inputs::Switch switch_source{hal_gpio, hal_timer, PIN_SWITCH_SOURCE, true, switch_cfg};
+static ui_inputs::Switch switch_solar{hal_gpio, hal_timer, PIN_SWITCH_SOLAR, true, switch_cfg};
+static ui_inputs::Switch switch_grid{hal_gpio, hal_timer, PIN_SWITCH_GRID, true, switch_cfg};
 
 static ui_inputs::ButtonConfig button_cfg{
     .debounce_press_ms = 50,
@@ -179,8 +180,8 @@ extern "C" void app_main()
         *g_command_handler,
         status_reporter,
         tank_display,
-        switch_mode,
-        switch_source,
+        switch_solar,
+        switch_grid,
         button_action,
         wifi,
         ota_controller,

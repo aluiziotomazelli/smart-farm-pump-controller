@@ -34,8 +34,8 @@ PumpController::PumpController(
     PumpCommandHandler& command_handler,
     IPumpStatusReporter& status_reporter,
     ITankStripDisplay& display,
-    ui_inputs::ISwitch& switch_mode,
-    ui_inputs::ISwitch& switch_source,
+    ui_inputs::ISwitch& switch_solar,
+    ui_inputs::ISwitch& switch_grid,
     ui_inputs::IButton& button_action,
     wifi_manager::IWiFiManager& wifi_manager,
     IOtaController& ota_controller,
@@ -50,8 +50,8 @@ PumpController::PumpController(
     , command_handler_(command_handler)
     , status_reporter_(status_reporter)
     , display_(display)
-    , switch_mode_(switch_mode)
-    , switch_source_(switch_source)
+    , switch_solar_(switch_solar)
+    , switch_grid_(switch_grid)
     , button_action_(button_action)
     , wifi_manager_(wifi_manager)
     , ota_controller_(ota_controller)
@@ -128,16 +128,23 @@ esp_err_t PumpController::init()
         return err;
     }
 
-    err = switch_mode_.init();
+    err = display_.start();
     if (err != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to init mode switch: %s", esp_err_to_name(err));
+        ESP_LOGE(TAG, "Failed to start tank display task: %s", esp_err_to_name(err));
         session_healthy = false;
         return err;
     }
 
-    err = switch_source_.init();
+    err = switch_solar_.init();
     if (err != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to init source switch: %s", esp_err_to_name(err));
+        ESP_LOGE(TAG, "Failed to init solar switch: %s", esp_err_to_name(err));
+        session_healthy = false;
+        return err;
+    }
+
+    err = switch_grid_.init();
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to init grid switch: %s", esp_err_to_name(err));
         session_healthy = false;
         return err;
     }
@@ -156,7 +163,15 @@ esp_err_t PumpController::init()
     }
 
     // Perform post-boot firmware verification after all subsystems initialized
-    if (!check_firmware_health(session_healthy)) {
+    if (ota_controller_.check_pending_verify()) {
+        if (!check_firmware_health(session_healthy)) {
+            return ESP_FAIL;
+        }
+    }
+
+    if (!session_healthy) {
+        display_.set_override_pattern(TankStripPattern::BOOT_ERROR);
+        hal_rtos_.task_delay(pdMS_TO_TICKS(500));
         return ESP_FAIL;
     }
 
@@ -194,7 +209,7 @@ void PumpController::stop()
         task_handle_ = nullptr;
     }
     btn_trigger_.disarm();
-    display_.clear();
+    display_.stop();
     ESP_LOGI(TAG, "PumpController stopped");
 }
 
@@ -207,34 +222,51 @@ void PumpController::on_ota_triggered(OtaTriggerSource source)
 void PumpController::tick(uint32_t delta_ms)
 {
     // 1. Sample Switch Inputs
-    switch_mode_.update();
-    farm::ControlMode mode = (switch_mode_.get_state() == ui_inputs::SwitchState::CLOSED) ? farm::ControlMode::AUTO
-                                                                                          : farm::ControlMode::MANUAL;
-    state_machine_.set_control_mode(mode);
+    switch_solar_.update();
+    switch_grid_.update();
 
-    switch_source_.update();
-    farm::PowerSource source = (switch_source_.get_state() == ui_inputs::SwitchState::CLOSED) ? farm::PowerSource::SOLAR
-                                                                                              : farm::PowerSource::GRID;
+    bool solar_sel = (switch_solar_.get_state() == ui_inputs::SwitchState::CLOSED);
+    bool grid_sel = (switch_grid_.get_state() == ui_inputs::SwitchState::CLOSED);
 
-    // 2. Sample Manual Action Button (Toggle Start/Stop)
+    farm::PowerSource locked_source = farm::PowerSource::UNKNOWN;
+
+    if (solar_sel && grid_sel) {
+        locked_source = farm::PowerSource::GRID; // Grid takes priority on dual closed conflict
+        ESP_LOGW(TAG, "Dual switch conflict detected (both SOLAR and GRID closed); defaulting to GRID");
+    }
+    else if (solar_sel) {
+        locked_source = farm::PowerSource::SOLAR;
+    }
+    else if (grid_sel) {
+        locked_source = farm::PowerSource::GRID;
+    }
+
+    state_machine_.set_source_lock(locked_source);
+
+    // 2. Sample Action Button
     button_action_.update();
 
-    if (mode == farm::ControlMode::MANUAL) {
-        if (button_action_.get_last_click() != ui_inputs::ButtonClickType::NONE_CLICK) {
-            auto current_snapshot = state_machine_.get_snapshot();
-            if (current_snapshot.state == farm::LoadState::RUNNING) {
-                ESP_LOGI(TAG, "Manual Action: Pump is RUNNING -> STOP triggered");
-                state_machine_.handle_manual_stop();
+    if (button_action_.get_last_click() != ui_inputs::ButtonClickType::NONE_CLICK) {
+        auto current_snapshot = state_machine_.get_snapshot();
+        if (current_snapshot.state == farm::LoadState::RUNNING) {
+            ESP_LOGI(TAG, "Operator Action: Pump is RUNNING -> STOP triggered");
+            state_machine_.handle_operator_stop();
+        }
+        else if (locked_source != farm::PowerSource::UNKNOWN) {
+            ESP_LOGI(
+                TAG,
+                "Operator Action: Pump is IDLE with source %d locked -> START triggered",
+                static_cast<int>(locked_source));
+            esp_err_t start_err = state_machine_.handle_operator_start(locked_source);
+            if (start_err == ESP_OK) {
+                stats_.manual_starts_total++;
+                stats_.start_cycles_total++;
+                pump_storage_.save_app_data(stats_, false);
             }
-            else {
-                ESP_LOGI(TAG, "Manual Action: Pump is OFF -> START triggered for source %d", static_cast<int>(source));
-                esp_err_t start_err = state_machine_.handle_manual_start(source);
-                if (start_err == ESP_OK) {
-                    stats_.manual_starts_total++;
-                    stats_.start_cycles_total++;
-                    pump_storage_.save_app_data(stats_, false);
-                }
-            }
+        }
+        else {
+            ESP_LOGI(TAG, "Operator Action: Pump is IDLE in AUTO -> sending FILL_REQUEST to Hub");
+            send_fill_request();
         }
     }
 
@@ -248,7 +280,7 @@ void PumpController::tick(uint32_t delta_ms)
     if (cmd_res.reboot_requested) {
         ESP_LOGW(TAG, "Reboot requested via command; persisting state and restarting...");
         save_persistent_state(true);
-        state_machine_.handle_manual_stop();
+        state_machine_.handle_operator_stop();
         hal_rtos_.task_delay(pdMS_TO_TICKS(100));
         hal_system_.restart();
         return;
@@ -265,8 +297,7 @@ void PumpController::tick(uint32_t delta_ms)
 
     // 5. Update Visual Feedback on Addressable Strip & Runtime Accounting
     auto snapshot = state_machine_.get_snapshot();
-    display_.update_state(snapshot.state, mode, snapshot.source);
-    display_.tick(delta_ms);
+    display_.update_state(snapshot.state, snapshot.mode, snapshot.source);
 
     if (snapshot.state == farm::LoadState::RUNNING) {
         runtime_accumulator_ms_ += delta_ms;
@@ -423,10 +454,6 @@ void PumpController::update_running_version()
 
 bool PumpController::check_firmware_health(bool session_healthy)
 {
-    if (!ota_controller_.check_pending_verify()) {
-        return true;
-    }
-
     ESP_LOGI(TAG, "Pending OTA verification detected on boot; confirming firmware...");
     OtaActionResult result = ota_controller_.confirm_firmware(session_healthy);
     send_ota_report(result.exec_result, result.error_code);
@@ -439,10 +466,7 @@ bool PumpController::check_firmware_health(bool session_healthy)
 
     display_.set_override_pattern(TankStripPattern::BOOT_ERROR);
     ESP_LOGE(TAG, "Post-boot OTA verification failed! Triggering rollback and reboot...");
-    for (int i = 0; i < 15; i++) {
-        display_.tick(100);
-        hal_rtos_.task_delay(pdMS_TO_TICKS(100));
-    }
+    hal_rtos_.task_delay(pdMS_TO_TICKS(500));
     ota_controller_.rollback_and_reboot();
     return false;
 }
@@ -456,11 +480,10 @@ void PumpController::process_pending_ota()
     btn_trigger_.disarm();
 
     // 1. Safety Interlock: Stop pump immediately before firmware flash
-    state_machine_.handle_manual_stop();
+    state_machine_.handle_operator_stop();
 
     // 2. Visual feedback on addressable strip
     display_.set_override_pattern(TankStripPattern::OTA_UPDATING);
-    display_.tick(0);
 
     // 3. Connect to WiFi with sync retries
     ESP_LOGI(TAG, "Connecting to WiFi for OTA download (timeout: 15000 ms, max_retries: 3)...");
@@ -526,6 +549,16 @@ esp_err_t PumpController::send_ota_report(farm::OtaExecResult result, farm::OtaE
         &report,
         sizeof(report),
         true);
+}
+
+esp_err_t PumpController::send_fill_request()
+{
+    farm::FillRequest req{};
+    req.circuit_id = 0;
+
+    ESP_LOGI(TAG, "Sending FILL_REQUEST to Hub (circuit %u)", req.circuit_id);
+    return espnow_.send_data(
+        espnow::ReservedIds::HUB, static_cast<uint8_t>(farm::PayloadType::FILL_REQUEST), &req, sizeof(req), true);
 }
 
 void PumpController::task_entry(void* arg)

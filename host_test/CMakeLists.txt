@@ -4,6 +4,17 @@ project(pump_controller_host_tests NONE)
 # Enable CTest for this project
 include(CTest)
 
+get_filename_component(PROJECT_ROOT "${CMAKE_CURRENT_LIST_DIR}/.." ABSOLUTE)
+
+# Fallback for secrets.hpp
+if(NOT EXISTS "${PROJECT_ROOT}/main/include/secrets.hpp")
+    if(EXISTS "${PROJECT_ROOT}/main/include/secrets.example.hpp")
+        message(STATUS "secrets.hpp not found, creating from secrets.example.hpp")
+        configure_file("${PROJECT_ROOT}/main/include/secrets.example.hpp"
+                       "${PROJECT_ROOT}/main/include/secrets.hpp" COPYONLY)
+    endif()
+endif()
+
 # Define the tests for CTest
 add_test(NAME test_pump_state_machine COMMAND ../test_pump_state_machine/build/test_pump_state_machine.elf)
 add_test(NAME test_pump_command_handler COMMAND ../test_pump_command_handler/build/test_pump_command_handler.elf)
