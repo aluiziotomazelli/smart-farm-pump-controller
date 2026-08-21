@@ -14,11 +14,6 @@ idf_component_register(
         "../../../components/idf_hals/include"
         "../../../components/idf_hals/include/interfaces"
         "../../../components/idf_hals/mocks"
-        "../../../managed_components/espressif__led_strip/include"
-        "../../../managed_components/espressif__led_strip/interface"
-        "$ENV{IDF_PATH}/components/esp_driver_rmt/include"
-        "$ENV{IDF_PATH}/components/esp_driver_spi/include"
-        "$ENV{IDF_PATH}/components/hal/include"
     REQUIRES 
         gtest
         smart-farm-common
