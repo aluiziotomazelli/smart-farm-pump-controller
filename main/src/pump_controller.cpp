@@ -37,6 +37,7 @@ PumpController::PumpController(
     ui_inputs::ISwitch& switch_solar,
     ui_inputs::ISwitch& switch_grid,
     ui_inputs::IButton& button_action,
+    time_manager::ITimeManager& timer_manager,
     wifi_manager::IWiFiManager& wifi_manager,
     IOtaController& ota_controller,
     IOtaTrigger& btn_trigger,
@@ -53,6 +54,7 @@ PumpController::PumpController(
     , switch_solar_(switch_solar)
     , switch_grid_(switch_grid)
     , button_action_(button_action)
+    , time_manager_(timer_manager)
     , wifi_manager_(wifi_manager)
     , ota_controller_(ota_controller)
     , btn_trigger_(btn_trigger)
@@ -102,6 +104,12 @@ esp_err_t PumpController::init()
     err = init_espnow();
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "Failed to init ESP-NOW: %s", esp_err_to_name(err));
+        session_healthy = false;
+    }
+
+    err = init_time_manager();
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to init time manager: %s", esp_err_to_name(err));
         session_healthy = false;
     }
 
@@ -177,6 +185,7 @@ esp_err_t PumpController::init()
 
     // Trigger visual self-test sweep on every successful boot
     display_.set_override_pattern(TankStripPattern::BOOT_SUCCESS);
+    update_display_brightness(0);
 
     ESP_LOGI(
         TAG,
@@ -298,6 +307,7 @@ void PumpController::tick(uint32_t delta_ms)
     // 5. Update Visual Feedback on Addressable Strip & Runtime Accounting
     auto snapshot = state_machine_.get_snapshot();
     display_.update_state(snapshot.state, snapshot.mode, snapshot.source);
+    update_display_brightness(delta_ms);
 
     if (snapshot.state == farm::LoadState::RUNNING) {
         runtime_accumulator_ms_ += delta_ms;
@@ -437,6 +447,15 @@ esp_err_t PumpController::init_espnow()
     return espnow_.init(config);
 }
 
+esp_err_t PumpController::init_time_manager()
+{
+    time_manager::TimeManagerConfig time_config;
+    time_config.use_dhcp_sntp = false;
+    time_config.timezone = "<-04>4";
+
+    return time_manager_.init(time_config);
+}
+
 void PumpController::update_running_version()
 {
     auto current_version = ota_controller_.get_running_version();
@@ -559,6 +578,42 @@ esp_err_t PumpController::send_fill_request()
     ESP_LOGI(TAG, "Sending FILL_REQUEST to Hub (circuit %u)", req.circuit_id);
     return espnow_.send_data(
         espnow::ReservedIds::HUB, static_cast<uint8_t>(farm::PayloadType::FILL_REQUEST), &req, sizeof(req), true);
+}
+
+void PumpController::update_display_brightness(uint32_t delta_ms)
+{
+    if (!time_manager_.is_synchronized()) {
+        return;
+    }
+
+    brightness_check_accumulator_ms_ += delta_ms;
+    static constexpr uint32_t BRIGHTNESS_CHECK_PERIOD_MS = 10000; // Check every 10 seconds
+    if (delta_ms > 0 && brightness_check_accumulator_ms_ < BRIGHTNESS_CHECK_PERIOD_MS) {
+        return;
+    }
+    brightness_check_accumulator_ms_ = 0;
+
+    static constexpr uint8_t BRIGHTNESS_DAY = 180;        // 06:00 to 18:00
+    static constexpr uint8_t BRIGHTNESS_TWILIGHT = 30;    // 18:00 to 22:00
+    static constexpr uint8_t BRIGHTNESS_NIGHT = 20;       // 22:00 to 06:00
+
+    time_t now = time_manager_.get_timestamp_sec();
+    struct tm timeinfo;
+    localtime_r(&now, &timeinfo);
+
+    uint8_t target_brightness = BRIGHTNESS_NIGHT;
+    if (timeinfo.tm_hour >= 6 && timeinfo.tm_hour < 18) {
+        target_brightness = BRIGHTNESS_DAY;
+    }
+    else if (timeinfo.tm_hour >= 18 && timeinfo.tm_hour < 22) {
+        target_brightness = BRIGHTNESS_TWILIGHT;
+    }
+
+    if (target_brightness != current_display_brightness_) {
+        current_display_brightness_ = target_brightness;
+        display_.set_brightness(target_brightness);
+        ESP_LOGI(TAG, "Display brightness updated to %u", target_brightness);
+    }
 }
 
 void PumpController::task_entry(void* arg)

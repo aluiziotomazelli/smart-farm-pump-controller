@@ -13,6 +13,7 @@
 #include "interfaces/i_hal_system.hpp"
 #include "interfaces/i_nvs_core.hpp"
 #include "interfaces/i_pump_nvs.hpp"
+#include "interfaces/i_time_manager.hpp"
 #include "interfaces/i_wifi_manager.hpp"
 #include "interfaces/i_ota_controller.hpp"
 #include "interfaces/i_ota_trigger.hpp"
@@ -39,6 +40,7 @@ public:
         ui_inputs::ISwitch& switch_solar,
         ui_inputs::ISwitch& switch_grid,
         ui_inputs::IButton& button_action,
+        time_manager::ITimeManager& time_manager,
         wifi_manager::IWiFiManager& wifi_manager,
         IOtaController& ota_controller,
         IOtaTrigger& btn_trigger,
@@ -88,6 +90,7 @@ private:
     ui_inputs::ISwitch& switch_solar_;
     ui_inputs::ISwitch& switch_grid_;
     ui_inputs::IButton& button_action_;
+    time_manager::ITimeManager& time_manager_;
     wifi_manager::IWiFiManager& wifi_manager_;
     IOtaController& ota_controller_;
     IOtaTrigger& btn_trigger_;
@@ -103,6 +106,8 @@ private:
 
     uint32_t runtime_accumulator_ms_{0};
     uint32_t nvs_commit_accumulator_ms_{0};
+    uint32_t brightness_check_accumulator_ms_{0};
+    uint8_t current_display_brightness_{0};
 
     TaskHandle_t task_handle_{nullptr};
     bool is_running_{false};
@@ -112,8 +117,10 @@ private:
     esp_err_t init_wifi();
     esp_err_t init_ota();
     esp_err_t init_espnow();
+    esp_err_t init_time_manager();
     void update_running_version();
     bool check_firmware_health(bool session_healthy);
+    void update_display_brightness(uint32_t delta_ms);
 
     void process_pending_ota();
     esp_err_t send_ota_report(farm::OtaExecResult result, farm::OtaErrorCode error_code);

@@ -17,10 +17,12 @@ PumpStatusReporter::PumpStatusReporter(
     espnow::IEspNowManager& espnow,
     IPumpStateMachine& state_machine,
     idf_hals::ITimerHAL& hal_timer,
+    time_manager::ITimeManager& time_manager,
     const PumpStatusReporterConfig& config)
     : espnow_(espnow)
     , state_machine_(state_machine)
     , hal_timer_(hal_timer)
+    , time_manager_(time_manager)
     , config_(config)
 {
 }
@@ -51,6 +53,7 @@ farm::LoadControlStatus PumpStatusReporter::build_status_payload() const
     status.power_w = snapshot.power_w;
     status.runtime_s = snapshot.runtime_s;
     status.uptime_s = uptime_s;
+    status.unix_time = time_manager_.is_synchronized() ? time_manager_.get_timestamp_ms() : 0;
 
     return status;
 }
@@ -89,26 +92,38 @@ esp_err_t PumpStatusReporter::send_status_report(bool require_ack)
 void PumpStatusReporter::tick(uint32_t delta_ms)
 {
     auto snapshot = state_machine_.get_snapshot();
+    bool is_operational = (espnow_.get_node_state() == espnow::NodeState::OPERATIONAL);
 
-    // 1. Check if state machine reported a transition -> send immediately WITH ACK
+    // 1. Check if state machine reported a transition -> mark pending and send immediately WITH ACK if operational
     if (state_machine_.consume_state_changed()) {
         espnow_.set_enable_heartbeat(snapshot.state != farm::LoadState::RUNNING);
+        pending_ack_retry_ = true;
+        retry_timer_ms_ = 0;
 
-        ESP_LOGI(TAG, "State transition detected on tick; sending immediate status report WITH ACK");
-        esp_err_t err = send_status_report(true);
-        if (err != ESP_OK) {
-            ESP_LOGW(TAG, "Failed to deliver state change report; scheduling retry");
-            pending_ack_retry_ = true;
-            retry_timer_ms_ = 0;
+        if (is_operational) {
+            ESP_LOGI(TAG, "State transition detected on tick; sending immediate status report WITH ACK");
+            esp_err_t err = send_status_report(true);
+            if (err == ESP_OK) {
+                pending_ack_retry_ = false;
+            }
+            else {
+                ESP_LOGW(TAG, "Failed to deliver state change report; scheduling retry");
+            }
         }
         else {
-            pending_ack_retry_ = false;
+            ESP_LOGD(TAG, "State transition queued (ESP-NOW not operational; will dispatch upon connection)");
         }
         return;
     }
 
-    // 2. Retry unacknowledged state change report
+    // 2. Retry unacknowledged state change report (only when operational)
     if (pending_ack_retry_) {
+        if (!is_operational) {
+            // Keep retry timer primed so we dispatch immediately on the very first tick after returning to OPERATIONAL
+            retry_timer_ms_ = RETRY_INTERVAL_MS;
+            return;
+        }
+
         retry_timer_ms_ += delta_ms;
         if (retry_timer_ms_ >= RETRY_INTERVAL_MS) {
             ESP_LOGI(TAG, "Retrying unacknowledged state change report WITH ACK...");
@@ -126,8 +141,10 @@ void PumpStatusReporter::tick(uint32_t delta_ms)
     if (snapshot.state == farm::LoadState::RUNNING) {
         elapsed_since_last_send_ms_ += delta_ms;
         if (elapsed_since_last_send_ms_ >= config_.running_report_interval_ms) {
-            ESP_LOGD(TAG, "Running report timer expired; sending periodic status report");
-            send_status_report(false);
+            if (is_operational) {
+                ESP_LOGD(TAG, "Running report timer expired; sending periodic status report");
+                send_status_report(false);
+            }
         }
     }
     else {
@@ -140,13 +157,14 @@ void PumpStatusReporter::notify_state_change()
     auto snapshot = state_machine_.get_snapshot();
     espnow_.set_enable_heartbeat(snapshot.state != farm::LoadState::RUNNING);
 
-    ESP_LOGI(TAG, "Explicit notify_state_change triggered; sending status report WITH ACK");
-    esp_err_t err = send_status_report(true);
-    if (err != ESP_OK) {
-        pending_ack_retry_ = true;
-        retry_timer_ms_ = 0;
-    }
-    else {
-        pending_ack_retry_ = false;
+    pending_ack_retry_ = true;
+    retry_timer_ms_ = 0;
+
+    if (espnow_.get_node_state() == espnow::NodeState::OPERATIONAL) {
+        ESP_LOGI(TAG, "Explicit notify_state_change triggered; sending status report WITH ACK");
+        esp_err_t err = send_status_report(true);
+        if (err == ESP_OK) {
+            pending_ack_retry_ = false;
+        }
     }
 }

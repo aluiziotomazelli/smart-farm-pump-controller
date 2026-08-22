@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.0] - 2026-08-22
+
+### Added
+- **Water Tank Backup Mode Support (`TankStripDisplay`)**:
+  - Integrated visual feedback for degraded water tank telemetry (`backup_mode_active` and `float_switch_is_full` flags in `TankLevelUpdate`).
+  - Added `HUE_BACKUP` (35 / Amber) to the semantic color palette to clearly indicate float switch contingency operation.
+  - Implemented binary water level rendering for backup mode: full strip in Amber when `float_switch_is_full == true`, or base LED 0 in Amber when not full.
+  - Preserved all dynamic operational animations (soft packet-arrival breathing wave, Solar/Grid chasing LEDs, source-locked top LED accents, and communication timeout indicators) with automatic color substitution.
+- **Protocol & Interface Updates**:
+  - Extended `ITankLevelDisplay::set_level(uint16_t permille, bool backup_mode, bool is_full)`.
+  - Updated `PumpCommandHandler` to parse extended `farm::TankLevelUpdate` protocol payload and forward backup mode states.
+- **Extended Test Suite**:
+  - Added dedicated unit tests for backup mode in `test_tank_strip_display` and `test_pump_command_handler`, bringing total test coverage to **98 passing tests**.
+
 ## [0.2.0] - 2026-08-20
 
 ### Added

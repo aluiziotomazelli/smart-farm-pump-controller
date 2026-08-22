@@ -8,7 +8,7 @@ class MockTankStripDisplay : public ITankStripDisplay
 {
 public:
     MOCK_METHOD(esp_err_t, init, (), (override));
-    MOCK_METHOD(void, set_level, (uint16_t permille), (override));
+    MOCK_METHOD(void, set_level, (uint16_t permille, bool backup_mode, bool is_full), (override));
     MOCK_METHOD(uint16_t, get_level, (), (const, override));
     MOCK_METHOD(void, update_state, (farm::LoadState state, farm::ControlMode mode, farm::PowerSource source), (override));
     MOCK_METHOD(void, set_override_pattern, (TankStripPattern pattern), (override));

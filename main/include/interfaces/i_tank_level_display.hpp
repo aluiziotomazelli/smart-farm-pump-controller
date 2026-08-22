@@ -22,8 +22,10 @@ public:
     /**
      * @brief Updates the displayed tank level.
      * @param permille Water level in permille (0 to 1000).
+     * @param backup_mode True if water tank is operating in backup mode (float switch only).
+     * @param is_full True if mechanical float switch indicates full tank.
      */
-    virtual void set_level(uint16_t permille) = 0;
+    virtual void set_level(uint16_t permille, bool backup_mode = false, bool is_full = false) = 0;
 
     /**
      * @brief Gets the last received water level in permille.

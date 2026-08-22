@@ -144,8 +144,17 @@ void PumpCommandHandler::process_data_message(const espnow::AppMessage& msg, Pum
     if (payload_type == static_cast<uint8_t>(farm::PayloadType::TANK_LEVEL_UPDATE)) {
         if (msg.payload_len >= sizeof(farm::TankLevelUpdate)) {
             const auto* update = reinterpret_cast<const farm::TankLevelUpdate*>(msg.payload);
-            ESP_LOGI(TAG, "Received TANK_LEVEL_UPDATE: tank %u, level %u permille", update->tank_id, update->level_permille);
-            tank_display_.set_level(update->level_permille);
+            ESP_LOGI(
+                TAG,
+                "Received TANK_LEVEL_UPDATE: tank %u, level %u permille, backup=%d, full=%d",
+                update->tank_id,
+                update->level_permille,
+                update->backup_mode_active,
+                update->float_switch_is_full);
+            tank_display_.set_level(
+                update->level_permille,
+                update->backup_mode_active,
+                update->float_switch_is_full);
             if (msg.requires_ack) {
                 espnow_.confirm_reception(msg.sender_id, msg.sequence_number, espnow::AckStatus::OK);
             }

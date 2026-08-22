@@ -124,7 +124,9 @@ TEST_F(TankStripDisplayTest, SetLevelSendsCommandToQueue)
         .WillOnce([](QueueHandle_t, const void* item, TickType_t) {
             const auto* cmd = static_cast<const DisplayCommand*>(item);
             EXPECT_EQ(cmd->type, DisplayCmdType::SET_LEVEL);
-            EXPECT_EQ(cmd->level_permille, 750);
+            EXPECT_EQ(cmd->level_data.level_permille, 750);
+            EXPECT_FALSE(cmd->level_data.backup_mode);
+            EXPECT_FALSE(cmd->level_data.is_full);
             return pdTRUE;
         });
 
@@ -186,7 +188,9 @@ TEST_F(TankStripDisplayTest, IdleRendersStaticCyanProportionalToLevelInAuto)
 {
     InitAndClearCaptures();
 
-    display_->process_command(DisplayCommand{.type = DisplayCmdType::SET_LEVEL, .level_permille = 500});
+    display_->process_command(DisplayCommand{
+        .type = DisplayCmdType::SET_LEVEL,
+        .level_data = {.level_permille = 500, .backup_mode = false, .is_full = false}});
     display_->process_command(DisplayCommand{
         .type = DisplayCmdType::UPDATE_STATE,
         .state_data = {.state = farm::LoadState::IDLE, .mode = farm::ControlMode::AUTO, .source = farm::PowerSource::UNKNOWN}});
@@ -215,7 +219,9 @@ TEST_F(TankStripDisplayTest, IdleSourceLockedSolarRendersCyanBaseAndGreenTopLed)
 {
     InitAndClearCaptures();
 
-    display_->process_command(DisplayCommand{.type = DisplayCmdType::SET_LEVEL, .level_permille = 500}); // 5 LEDs: 0..4
+    display_->process_command(DisplayCommand{
+        .type = DisplayCmdType::SET_LEVEL,
+        .level_data = {.level_permille = 500, .backup_mode = false, .is_full = false}}); // 5 LEDs: 0..4
     display_->process_command(DisplayCommand{
         .type = DisplayCmdType::UPDATE_STATE,
         .state_data = {.state = farm::LoadState::IDLE, .mode = farm::ControlMode::SOURCE_LOCKED, .source = farm::PowerSource::SOLAR}});
@@ -244,7 +250,9 @@ TEST_F(TankStripDisplayTest, IdleSourceLockedGridRendersCyanBaseAndRedTopLed)
 {
     InitAndClearCaptures();
 
-    display_->process_command(DisplayCommand{.type = DisplayCmdType::SET_LEVEL, .level_permille = 500}); // 5 LEDs: 0..4
+    display_->process_command(DisplayCommand{
+        .type = DisplayCmdType::SET_LEVEL,
+        .level_data = {.level_permille = 500, .backup_mode = false, .is_full = false}}); // 5 LEDs: 0..4
     display_->process_command(DisplayCommand{
         .type = DisplayCmdType::UPDATE_STATE,
         .state_data = {.state = farm::LoadState::IDLE, .mode = farm::ControlMode::SOURCE_LOCKED, .source = farm::PowerSource::GRID}});
@@ -273,14 +281,18 @@ TEST_F(TankStripDisplayTest, SetLevelTriggersIdleSoftBreathingWave)
 {
     InitAndClearCaptures();
 
-    display_->process_command(DisplayCommand{.type = DisplayCmdType::SET_LEVEL, .level_permille = 500});
+    display_->process_command(DisplayCommand{
+        .type = DisplayCmdType::SET_LEVEL,
+        .level_data = {.level_permille = 500, .backup_mode = false, .is_full = false}});
     display_->process_command(DisplayCommand{
         .type = DisplayCmdType::UPDATE_STATE,
         .state_data = {.state = farm::LoadState::IDLE, .mode = farm::ControlMode::AUTO, .source = farm::PowerSource::UNKNOWN}});
     display_->process_frame(700);
 
     // New update received -> triggers breathing wave
-    display_->process_command(DisplayCommand{.type = DisplayCmdType::SET_LEVEL, .level_permille = 600});
+    display_->process_command(DisplayCommand{
+        .type = DisplayCmdType::SET_LEVEL,
+        .level_data = {.level_permille = 600, .backup_mode = false, .is_full = false}});
     captured_pixels_.clear();
 
     // Halfway through breathing wave (300ms) -> value should be lower (dip to ~40%)
@@ -301,7 +313,9 @@ TEST_F(TankStripDisplayTest, FillingAutoSolarRendersCyanBaseAndGreenChase)
 {
     InitAndClearCaptures();
 
-    display_->process_command(DisplayCommand{.type = DisplayCmdType::SET_LEVEL, .level_permille = 500}); // 5 LEDs base
+    display_->process_command(DisplayCommand{
+        .type = DisplayCmdType::SET_LEVEL,
+        .level_data = {.level_permille = 500, .backup_mode = false, .is_full = false}}); // 5 LEDs base
     display_->process_command(DisplayCommand{
         .type = DisplayCmdType::UPDATE_STATE,
         .state_data = {.state = farm::LoadState::RUNNING, .mode = farm::ControlMode::AUTO, .source = farm::PowerSource::SOLAR}});
@@ -338,7 +352,9 @@ TEST_F(TankStripDisplayTest, FillingAutoGridRendersCyanBaseAndRedChase)
 {
     InitAndClearCaptures();
 
-    display_->process_command(DisplayCommand{.type = DisplayCmdType::SET_LEVEL, .level_permille = 400}); // 4 LEDs base
+    display_->process_command(DisplayCommand{
+        .type = DisplayCmdType::SET_LEVEL,
+        .level_data = {.level_permille = 400, .backup_mode = false, .is_full = false}}); // 4 LEDs base
     display_->process_command(DisplayCommand{
         .type = DisplayCmdType::UPDATE_STATE,
         .state_data = {.state = farm::LoadState::RUNNING, .mode = farm::ControlMode::AUTO, .source = farm::PowerSource::GRID}});
@@ -361,7 +377,9 @@ TEST_F(TankStripDisplayTest, FillingManualSolarRendersSolidGreenBarAndGreenChase
 {
     InitAndClearCaptures();
 
-    display_->process_command(DisplayCommand{.type = DisplayCmdType::SET_LEVEL, .level_permille = 600}); // 6 LEDs base
+    display_->process_command(DisplayCommand{
+        .type = DisplayCmdType::SET_LEVEL,
+        .level_data = {.level_permille = 600, .backup_mode = false, .is_full = false}}); // 6 LEDs base
     display_->process_command(DisplayCommand{
         .type = DisplayCmdType::UPDATE_STATE,
         .state_data = {.state = farm::LoadState::RUNNING, .mode = farm::ControlMode::STOP_OVERRIDE, .source = farm::PowerSource::SOLAR}});
@@ -384,7 +402,9 @@ TEST_F(TankStripDisplayTest, FillingManualGridRendersSolidRedBarAndRedChase)
 {
     InitAndClearCaptures();
 
-    display_->process_command(DisplayCommand{.type = DisplayCmdType::SET_LEVEL, .level_permille = 600}); // 6 LEDs base
+    display_->process_command(DisplayCommand{
+        .type = DisplayCmdType::SET_LEVEL,
+        .level_data = {.level_permille = 600, .backup_mode = false, .is_full = false}}); // 6 LEDs base
     display_->process_command(DisplayCommand{
         .type = DisplayCmdType::UPDATE_STATE,
         .state_data = {.state = farm::LoadState::RUNNING, .mode = farm::ControlMode::STOP_OVERRIDE, .source = farm::PowerSource::GRID}});
@@ -407,7 +427,9 @@ TEST_F(TankStripDisplayTest, ErrorTimeoutRendersCyanBaseAndOrangeBlinkingTopLed)
 {
     InitAndClearCaptures();
 
-    display_->process_command(DisplayCommand{.type = DisplayCmdType::SET_LEVEL, .level_permille = 500}); // 5 LEDs base
+    display_->process_command(DisplayCommand{
+        .type = DisplayCmdType::SET_LEVEL,
+        .level_data = {.level_permille = 500, .backup_mode = false, .is_full = false}}); // 5 LEDs base
     display_->process_command(DisplayCommand{
         .type = DisplayCmdType::UPDATE_STATE,
         .state_data = {.state = farm::LoadState::ERROR_TIMEOUT, .mode = farm::ControlMode::AUTO, .source = farm::PowerSource::SOLAR}});
@@ -514,7 +536,9 @@ TEST_F(TankStripDisplayTest, BrightnessScalesAllValueChannels)
 {
     InitAndClearCaptures();
 
-    display_->process_command(DisplayCommand{.type = DisplayCmdType::SET_LEVEL, .level_permille = 1000}); // All 10 LEDs
+    display_->process_command(DisplayCommand{
+        .type = DisplayCmdType::SET_LEVEL,
+        .level_data = {.level_permille = 1000, .backup_mode = false, .is_full = false}}); // All 10 LEDs
     display_->process_command(DisplayCommand{
         .type = DisplayCmdType::UPDATE_STATE,
         .state_data = {.state = farm::LoadState::IDLE, .mode = farm::ControlMode::AUTO, .source = farm::PowerSource::UNKNOWN}});
@@ -536,4 +560,94 @@ TEST_F(TankStripDisplayTest, BrightnessScalesAllValueChannels)
     display_->process_frame(50);
     ASSERT_EQ(captured_pixels_.size(), 10);
     EXPECT_EQ(captured_pixels_[0].value, 0);
+}
+
+TEST_F(TankStripDisplayTest, IdleBackupMode_FloatFull_RendersAllAmberLeds)
+{
+    InitAndClearCaptures();
+
+    display_->process_command(DisplayCommand{
+        .type = DisplayCmdType::SET_LEVEL,
+        .level_data = {.level_permille = 0, .backup_mode = true, .is_full = true}});
+    display_->process_command(DisplayCommand{
+        .type = DisplayCmdType::UPDATE_STATE,
+        .state_data = {.state = farm::LoadState::IDLE, .mode = farm::ControlMode::AUTO, .source = farm::PowerSource::UNKNOWN}});
+
+    EXPECT_TRUE(display_->is_backup_mode());
+    EXPECT_TRUE(display_->is_float_full());
+
+    // Advance past initial breathing timer
+    display_->process_frame(700);
+    captured_pixels_.clear();
+
+    display_->process_frame(50);
+    ASSERT_EQ(captured_pixels_.size(), 10);
+
+    // All 10 LEDs must be Amber (H=35, HUE_BACKUP)
+    for (uint32_t i = 0; i < 10; i++) {
+        EXPECT_EQ(captured_pixels_[i].index, i);
+        EXPECT_EQ(captured_pixels_[i].hue, 35);
+        EXPECT_GT(captured_pixels_[i].value, 0);
+    }
+}
+
+TEST_F(TankStripDisplayTest, IdleBackupMode_FloatNotFull_RendersOnlyBaseAmberLed)
+{
+    InitAndClearCaptures();
+
+    display_->process_command(DisplayCommand{
+        .type = DisplayCmdType::SET_LEVEL,
+        .level_data = {.level_permille = 0, .backup_mode = true, .is_full = false}});
+    display_->process_command(DisplayCommand{
+        .type = DisplayCmdType::UPDATE_STATE,
+        .state_data = {.state = farm::LoadState::IDLE, .mode = farm::ControlMode::AUTO, .source = farm::PowerSource::UNKNOWN}});
+
+    EXPECT_TRUE(display_->is_backup_mode());
+    EXPECT_FALSE(display_->is_float_full());
+
+    display_->process_frame(700);
+    captured_pixels_.clear();
+
+    display_->process_frame(50);
+    ASSERT_EQ(captured_pixels_.size(), 10);
+
+    // Base LED (0) is Amber (H=35)
+    EXPECT_EQ(captured_pixels_[0].index, 0);
+    EXPECT_EQ(captured_pixels_[0].hue, 35);
+    EXPECT_GT(captured_pixels_[0].value, 0);
+
+    // LEDs 1..9 are off
+    for (uint32_t i = 1; i < 10; i++) {
+        EXPECT_EQ(captured_pixels_[i].index, i);
+        EXPECT_EQ(captured_pixels_[i].value, 0);
+    }
+}
+
+TEST_F(TankStripDisplayTest, FillingAutoSolar_BackupMode_RendersAmberBaseAndGreenChase)
+{
+    InitAndClearCaptures();
+
+    // Backup mode not full -> 1 base LED (Amber), chase on remaining 9 LEDs
+    display_->process_command(DisplayCommand{
+        .type = DisplayCmdType::SET_LEVEL,
+        .level_data = {.level_permille = 0, .backup_mode = true, .is_full = false}});
+    display_->process_command(DisplayCommand{
+        .type = DisplayCmdType::UPDATE_STATE,
+        .state_data = {.state = farm::LoadState::RUNNING, .mode = farm::ControlMode::AUTO, .source = farm::PowerSource::SOLAR}});
+
+    display_->process_frame(50);
+    ASSERT_EQ(captured_pixels_.size(), 10);
+
+    // Base LED (0) = Amber (H=35)
+    EXPECT_EQ(captured_pixels_[0].hue, 35);
+
+    // Chase pixel at index 1 = Green (H=120)
+    EXPECT_EQ(captured_pixels_[1].index, 1);
+    EXPECT_EQ(captured_pixels_[1].hue, 120);
+    EXPECT_EQ(captured_pixels_[1].value, 255);
+
+    // Remaining above chase (2..9) = off
+    for (uint32_t i = 2; i < 10; i++) {
+        EXPECT_EQ(captured_pixels_[i].value, 0);
+    }
 }

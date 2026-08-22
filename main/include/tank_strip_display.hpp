@@ -28,7 +28,11 @@ struct DisplayCommand
 {
     DisplayCmdType type;
     union {
-        uint16_t level_permille;
+        struct {
+            uint16_t level_permille;
+            bool backup_mode;
+            bool is_full;
+        } level_data;
         struct {
             farm::LoadState state;
             farm::ControlMode mode;
@@ -59,10 +63,16 @@ public:
     void stop() override;
 
     /** @copydoc ITankLevelDisplay::set_level */
-    void set_level(uint16_t permille) override;
+    void set_level(uint16_t permille, bool backup_mode = false, bool is_full = false) override;
 
     /** @copydoc ITankLevelDisplay::get_level */
     uint16_t get_level() const override { return level_permille_; }
+
+    /** @brief Checks if display is currently operating in backup mode */
+    bool is_backup_mode() const { return backup_mode_active_; }
+
+    /** @brief Checks if float switch is currently indicating full tank */
+    bool is_float_full() const { return float_switch_is_full_; }
 
     /** @copydoc ITankStripDisplay::update_state */
     void update_state(farm::LoadState state, farm::ControlMode mode, farm::PowerSource source) override;
@@ -111,6 +121,8 @@ private:
     volatile bool is_running_{false};
 
     uint16_t level_permille_{0};
+    bool backup_mode_active_{false};
+    bool float_switch_is_full_{false};
     farm::LoadState state_{farm::LoadState::IDLE};
     farm::ControlMode mode_{farm::ControlMode::AUTO};
     farm::PowerSource source_{farm::PowerSource::UNKNOWN};
