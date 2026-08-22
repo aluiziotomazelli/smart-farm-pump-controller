@@ -230,7 +230,9 @@ TEST_F(PumpCommandHandlerTest, ProcessTankLevelUpdateDispatchesToDisplayAndAcks)
 {
     farm::TankLevelUpdate update{
         .tank_id = 1,
-        .level_permille = 750};
+        .level_permille = 750,
+        .backup_mode_active = false,
+        .float_switch_is_full = false};
 
     espnow::AppMessage msg{};
     msg.sender_id = static_cast<espnow::NodeId>(farm::NodeId::HUB);
@@ -243,8 +245,33 @@ TEST_F(PumpCommandHandlerTest, ProcessTankLevelUpdateDispatchesToDisplayAndAcks)
 
     SetupQueueWithMessages({msg});
 
-    EXPECT_CALL(tank_display_, set_level(750)).Times(1);
+    EXPECT_CALL(tank_display_, set_level(750, false, false)).Times(1);
     EXPECT_CALL(espnow_, confirm_reception(msg.sender_id, 120, espnow::AckStatus::OK)).Times(1);
+
+    sut_->process();
+}
+
+TEST_F(PumpCommandHandlerTest, ProcessTankLevelUpdate_WithBackupMode_DispatchesToDisplayAndAcks)
+{
+    farm::TankLevelUpdate update{
+        .tank_id = 0,
+        .level_permille = 0,
+        .backup_mode_active = true,
+        .float_switch_is_full = true};
+
+    espnow::AppMessage msg{};
+    msg.sender_id = static_cast<espnow::NodeId>(farm::NodeId::HUB);
+    msg.msg_type = espnow::MessageType::DATA;
+    msg.payload_type = static_cast<uint8_t>(farm::PayloadType::TANK_LEVEL_UPDATE);
+    msg.payload_len = sizeof(update);
+    std::memcpy(msg.payload, &update, sizeof(update));
+    msg.sequence_number = 121;
+    msg.requires_ack = true;
+
+    SetupQueueWithMessages({msg});
+
+    EXPECT_CALL(tank_display_, set_level(0, true, true)).Times(1);
+    EXPECT_CALL(espnow_, confirm_reception(msg.sender_id, 121, espnow::AckStatus::OK)).Times(1);
 
     sut_->process();
 }

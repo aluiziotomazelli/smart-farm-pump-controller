@@ -199,23 +199,25 @@ The addressable WS2812B LED strip (20 LEDs default) is driven by a dedicated Fre
 
 ### 8.1. Semantic Color Palette
 - `HUE_GRID` (0 / Red): Utility grid power source.
+- `HUE_TIMEOUT` (30 / Orange): Watchdog timeout error.
+- `HUE_BACKUP` (35 / Amber): Water tank operating in degraded backup mode (mechanical float switch).
 - `HUE_SOLAR` (120 / Green): Solar photovoltaic inverter power source.
 - `HUE_FILL` (180 / Cyan): Water volume in tank.
 - `HUE_OTA` (280 / Purple): OTA firmware upgrade in progress.
 - `HUE_BOOT_SUCCESS` (120 / Green): Successful boot self-test sweep.
 - `HUE_BOOT_ERROR` (0 / Red): Boot failure SOS warning.
-- `HUE_TIMEOUT` (30 / Orange): Watchdog timeout error.
 - `HUE_FAULT` (0 / Red): Electrical contactor fault.
 
 ### 8.2. Dynamic Animation Patterns
 | Mode / State | Animation Pattern | Description |
 | :--- | :--- | :--- |
 | **IDLE (AUTO)** | Static Cyan Bar + Breathing Wave | Shows current tank level in Cyan (`HUE_FILL`). Pulses in brightness on every received telemetry packet. |
-| **IDLE (SOURCE_LOCKED)** | Cyan Bar + Top LED Color Accent | Shows tank level in Cyan, with the top LED highlighted in Green (`HUE_SOLAR`) or Red (`HUE_GRID`) indicating the locked source. |
-| **RUNNING (AUTO - Solar)** | Cyan Bar + Green Chasing LED | Base water level in Cyan with a Green LED chasing upwards (200 ms/LED). |
-| **RUNNING (AUTO - Grid)** | Cyan Bar + Red Chasing LED | Base water level in Cyan with a Red LED chasing upwards (200 ms/LED). |
+| **IDLE (AUTO - Backup Mode)** | Amber Bar (Full or Base LED 0) + Breathing Wave | When Water Tank operates in backup mode (`backup_mode_active`), base water shifts from Cyan to Amber (`HUE_BACKUP`). Full strip lights up if `float_switch_is_full == true`; only base LED 0 lights up if not full. |
+| **IDLE (SOURCE_LOCKED)** | Cyan/Amber Bar + Top LED Color Accent | Shows tank level in Cyan (or Amber in backup), with the top LED highlighted in Green (`HUE_SOLAR`) or Red (`HUE_GRID`) indicating the locked source. |
+| **RUNNING (AUTO - Solar)** | Cyan/Amber Bar + Green Chasing LED | Base water level in Cyan (or Amber in backup) with a Green LED chasing upwards (200 ms/LED). |
+| **RUNNING (AUTO - Grid)** | Cyan/Amber Bar + Red Chasing LED | Base water level in Cyan (or Amber in backup) with a Red LED chasing upwards (200 ms/LED). |
 | **RUNNING (Manual)** | Solid Color Bar + Chasing LED | Active base in solid Green (Solar) or Red (Grid) for high-visibility operator alert. |
-| **ERROR_TIMEOUT** | Cyan Bar + Blinking Orange Top LED | Top LED blinks in Orange (1 Hz) while maintaining tank level visibility. |
+| **ERROR_TIMEOUT** | Cyan/Amber Bar + Blinking Orange Top LED | Top LED blinks in Orange (1 Hz) while maintaining tank level visibility. |
 | **ERROR_CONTACTOR_STUCK**| Full-Strip Red Pulsing | All LEDs pulse in Red at 2 Hz for critical hardware alert. |
 | **OTA_UPDATING** | Purple Knight Rider Scanner | Bidirectional Purple scanner running continuously in the background during download. |
 | **BOOT_SUCCESS** | Green Sweep Animation | Progressive 0% to 100% green sweep on boot confirmation, automatically reverting to normal operation. |
@@ -231,13 +233,13 @@ Testing is treated as a first-class citizen. 100% of business logic is compiled 
 | Test Project | Test Count | Description |
 | :--- | :--- | :--- |
 | `test_pump_state_machine` | 14 tests | State transitions, watchdog expiry, auto/manual rules, source locking |
-| `test_pump_command_handler` | 11 tests | ESP-NOW command decoding, validation, ACK replies, tank level routing |
+| `test_pump_command_handler` | 12 tests | ESP-NOW command decoding, validation, ACK replies, tank level routing |
 | `test_pump_status_reporter` | 11 tests | Heartbeat timing, state change triggers, payloads, power telemetry |
 | `test_contactor_controller` | 8 tests | Demagnetization delay, active-high/low, interlocking |
 | `test_pump_controller` | 15 tests | 3-pos switch sampling, pushbutton triggers, OTA flow, boot health checks |
 | `test_ota_controller` | 13 tests | Partition verification, rollback, download execution |
-| `test_tank_strip_display` | 22 tests | Dedicated task, command queue, semantic palette, animation frames |
-| **Total** | **94 tests** | **100% Passing** |
+| `test_tank_strip_display` | 25 tests | Dedicated task, command queue, semantic palette, animation frames, backup mode |
+| **Total** | **98 tests** | **100% Passing** |
 
 ### 9.2. Automated GitHub Actions CI
 - **`build.yml`:** Compiles production target firmware for ESP32-C3.

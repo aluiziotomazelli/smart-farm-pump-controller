@@ -12,6 +12,7 @@ static const char* TAG = "TankStripDisplay";
 // Semantic Color Palette Definitions (HSV Hue 0..360)
 static constexpr uint16_t HUE_GRID = 0;          ///< Red (Grid indicator & alert)
 static constexpr uint16_t HUE_TIMEOUT = 30;       ///< Orange (Communication timeout warning)
+static constexpr uint16_t HUE_BACKUP = 35;        ///< Amber / Gold (Backup float switch mode)
 static constexpr uint16_t HUE_SOLAR = 120;        ///< Green (Solar indicator & success)
 static constexpr uint16_t HUE_FILL = 180;         ///< Cyan (Water level fill)
 static constexpr uint16_t HUE_OTA = 280;          ///< Purple (OTA update scanner)
@@ -21,9 +22,11 @@ static constexpr uint16_t HUE_FAULT = 0;          ///< Red (Hardware fault / stu
 
 static constexpr uint8_t SAT_FULL = 255;
 static constexpr uint8_t SAT_CYAN = 240;
+static constexpr uint8_t SAT_BACKUP = 255;
 
 static constexpr uint8_t VAL_FULL = 255;
 static constexpr uint8_t VAL_CYAN = 200;
+static constexpr uint8_t VAL_BACKUP = 220;
 
 TankStripDisplay::TankStripDisplay(
     IHalLedStrip& hal_strip,
@@ -140,7 +143,7 @@ void TankStripDisplay::stop()
     ESP_LOGI(TAG, "TankStripDisplay stopped and resources deallocated");
 }
 
-void TankStripDisplay::set_level(uint16_t permille)
+void TankStripDisplay::set_level(uint16_t permille, bool backup_mode, bool is_full)
 {
     if (permille > 1000) {
         permille = 1000;
@@ -149,11 +152,15 @@ void TankStripDisplay::set_level(uint16_t permille)
     if (display_queue_ != nullptr) {
         DisplayCommand cmd{};
         cmd.type = DisplayCmdType::SET_LEVEL;
-        cmd.level_permille = permille;
+        cmd.level_data.level_permille = permille;
+        cmd.level_data.backup_mode = backup_mode;
+        cmd.level_data.is_full = is_full;
         hal_freertos_.queue_send(display_queue_, &cmd, 0);
     }
     else {
         level_permille_ = permille;
+        backup_mode_active_ = backup_mode;
+        float_switch_is_full_ = is_full;
         idle_breathe_timer_ms_ = 600;
     }
 }
@@ -229,7 +236,9 @@ void TankStripDisplay::process_command(const DisplayCommand& cmd)
 {
     switch (cmd.type) {
     case DisplayCmdType::SET_LEVEL:
-        level_permille_ = cmd.level_permille;
+        level_permille_ = cmd.level_data.level_permille;
+        backup_mode_active_ = cmd.level_data.backup_mode;
+        float_switch_is_full_ = cmd.level_data.is_full;
         idle_breathe_timer_ms_ = 600; // Trigger soft breathing confirmation cycle on IDLE
         break;
 
@@ -356,7 +365,13 @@ void TankStripDisplay::render_pixel_hsv(uint32_t index, uint16_t hue, uint8_t sa
 
 void TankStripDisplay::render_auto_pattern()
 {
-    uint32_t active_leds = calculate_active_leds(level_permille_);
+    uint32_t active_leds = 0;
+    if (backup_mode_active_) {
+        active_leds = float_switch_is_full_ ? config_.num_leds : (config_.num_leds > 0 ? 1 : 0);
+    }
+    else {
+        active_leds = calculate_active_leds(level_permille_);
+    }
 
     switch (state_) {
     case farm::LoadState::RUNNING:
@@ -390,7 +405,11 @@ void TankStripDisplay::render_idle(uint32_t active_leds, farm::ControlMode mode,
         factor = 0.4f + 0.6f * 0.5f * (1.0f + std::cos(2.0f * 3.14159265f * t));
     }
 
-    uint8_t val_fill = static_cast<uint8_t>(VAL_CYAN * factor);
+    uint16_t fill_hue = backup_mode_active_ ? HUE_BACKUP : HUE_FILL;
+    uint8_t fill_sat = backup_mode_active_ ? SAT_BACKUP : SAT_CYAN;
+    uint8_t base_val = backup_mode_active_ ? VAL_BACKUP : VAL_CYAN;
+
+    uint8_t val_fill = static_cast<uint8_t>(base_val * factor);
     uint8_t val_full = static_cast<uint8_t>(VAL_FULL * factor);
 
     if (mode == farm::ControlMode::SOURCE_LOCKED) {
@@ -404,9 +423,9 @@ void TankStripDisplay::render_idle(uint32_t active_leds, farm::ControlMode mode,
             }
         }
         else {
-            // LEDs 0..(active_leds - 2) in Cyan
+            // LEDs 0..(active_leds - 2) in fill color
             for (uint32_t i = 0; i + 1 < active_leds; i++) {
-                render_pixel_hsv(i, HUE_FILL, SAT_CYAN, val_fill);
+                render_pixel_hsv(i, fill_hue, fill_sat, val_fill);
             }
             // Top active LED in locked source color
             render_pixel_hsv(active_leds - 1, locked_hue, SAT_FULL, val_full);
@@ -418,10 +437,10 @@ void TankStripDisplay::render_idle(uint32_t active_leds, farm::ControlMode mode,
         }
     }
     else {
-        // Pure AUTO: all active LEDs in Cyan
+        // Pure AUTO: all active LEDs in fill color (Cyan or Amber)
         for (uint32_t i = 0; i < config_.num_leds; i++) {
             if (i < active_leds) {
-                render_pixel_hsv(i, HUE_FILL, SAT_CYAN, val_fill);
+                render_pixel_hsv(i, fill_hue, fill_sat, val_fill);
             }
             else {
                 render_pixel_hsv(i, 0, 0, 0);
@@ -433,17 +452,20 @@ void TankStripDisplay::render_idle(uint32_t active_leds, farm::ControlMode mode,
 void TankStripDisplay::render_filling_auto(uint32_t active_leds, farm::PowerSource source)
 {
     uint16_t source_hue = (source == farm::PowerSource::GRID) ? HUE_GRID : HUE_SOLAR;
+    uint16_t fill_hue = backup_mode_active_ ? HUE_BACKUP : HUE_FILL;
+    uint8_t fill_sat = backup_mode_active_ ? SAT_BACKUP : SAT_CYAN;
+    uint8_t base_val = backup_mode_active_ ? VAL_BACKUP : VAL_CYAN;
 
     // Render active level base
     if (mode_ == farm::ControlMode::SOURCE_LOCKED && active_leds > 0) {
         for (uint32_t i = 0; i + 1 < active_leds; i++) {
-            render_pixel_hsv(i, HUE_FILL, SAT_CYAN, VAL_CYAN);
+            render_pixel_hsv(i, fill_hue, fill_sat, base_val);
         }
         render_pixel_hsv(active_leds - 1, source_hue, SAT_FULL, VAL_FULL);
     }
     else {
         for (uint32_t i = 0; i < active_leds; i++) {
-            render_pixel_hsv(i, HUE_FILL, SAT_CYAN, VAL_CYAN);
+            render_pixel_hsv(i, fill_hue, fill_sat, base_val);
         }
     }
 
@@ -504,13 +526,16 @@ void TankStripDisplay::render_timeout(uint32_t active_leds)
 {
     bool is_on = (error_timer_ms_ % 1000) < 500;
     uint32_t top_idx = (active_leds > 0) ? (active_leds - 1) : 0;
+    uint16_t fill_hue = backup_mode_active_ ? HUE_BACKUP : HUE_FILL;
+    uint8_t fill_sat = backup_mode_active_ ? SAT_BACKUP : SAT_CYAN;
+    uint8_t base_val = backup_mode_active_ ? VAL_BACKUP : VAL_CYAN;
 
     for (uint32_t i = 0; i < active_leds; i++) {
         if (is_on && i == top_idx) {
             render_pixel_hsv(i, HUE_TIMEOUT, SAT_FULL, VAL_FULL);
         }
         else {
-            render_pixel_hsv(i, HUE_FILL, SAT_CYAN, VAL_CYAN);
+            render_pixel_hsv(i, fill_hue, fill_sat, base_val);
         }
     }
     for (uint32_t i = active_leds; i < config_.num_leds; i++) {
