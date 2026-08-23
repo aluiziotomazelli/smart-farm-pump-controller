@@ -10,7 +10,7 @@
 static const char* TAG = "TankStripDisplay";
 
 // Semantic Color Palette Definitions (HSV Hue 0..360)
-static constexpr uint16_t HUE_GRID = 0;          ///< Red (Grid indicator & alert)
+static constexpr uint16_t HUE_GRID = 0;           ///< Red (Grid indicator & alert)
 static constexpr uint16_t HUE_TIMEOUT = 30;       ///< Orange (Communication timeout warning)
 static constexpr uint16_t HUE_BACKUP = 35;        ///< Amber / Gold (Backup float switch mode)
 static constexpr uint16_t HUE_SOLAR = 120;        ///< Green (Solar indicator & success)
@@ -27,6 +27,8 @@ static constexpr uint8_t SAT_BACKUP = 255;
 static constexpr uint8_t VAL_FULL = 255;
 static constexpr uint8_t VAL_CYAN = 200;
 static constexpr uint8_t VAL_BACKUP = 220;
+
+static constexpr uint16_t IDLE_BREATHE_DURATION_MS = 2400;
 
 TankStripDisplay::TankStripDisplay(
     IHalLedStrip& hal_strip,
@@ -161,7 +163,7 @@ void TankStripDisplay::set_level(uint16_t permille, bool backup_mode, bool is_fu
         level_permille_ = permille;
         backup_mode_active_ = backup_mode;
         float_switch_is_full_ = is_full;
-        idle_breathe_timer_ms_ = 600;
+        idle_breathe_timer_ms_ = IDLE_BREATHE_DURATION_MS;
     }
 }
 
@@ -239,7 +241,7 @@ void TankStripDisplay::process_command(const DisplayCommand& cmd)
         level_permille_ = cmd.level_data.level_permille;
         backup_mode_active_ = cmd.level_data.backup_mode;
         float_switch_is_full_ = cmd.level_data.is_full;
-        idle_breathe_timer_ms_ = 600; // Trigger soft breathing confirmation cycle on IDLE
+        idle_breathe_timer_ms_ = IDLE_BREATHE_DURATION_MS; // Trigger soft breathing confirmation cycle on IDLE
         break;
 
     case DisplayCmdType::UPDATE_STATE:
@@ -401,8 +403,9 @@ void TankStripDisplay::render_idle(uint32_t active_leds, farm::ControlMode mode,
     // Smooth single wave breathing on data update (Value: 100% -> 40% -> 100%)
     float factor = 1.0f;
     if (idle_breathe_timer_ms_ > 0) {
-        float t = static_cast<float>(600 - idle_breathe_timer_ms_) / 600.0f;
-        factor = 0.4f + 0.6f * 0.5f * (1.0f + std::cos(2.0f * 3.14159265f * t));
+        float t = static_cast<float>(IDLE_BREATHE_DURATION_MS - idle_breathe_timer_ms_) /
+                  static_cast<float>(IDLE_BREATHE_DURATION_MS);
+        factor = 0.2f + 0.8f * 0.5f * (1.0f + std::cos(2.0f * 3.14159265f * t));
     }
 
     uint16_t fill_hue = backup_mode_active_ ? HUE_BACKUP : HUE_FILL;

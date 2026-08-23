@@ -593,9 +593,9 @@ void PumpController::update_display_brightness(uint32_t delta_ms)
     }
     brightness_check_accumulator_ms_ = 0;
 
-    static constexpr uint8_t BRIGHTNESS_DAY = 180;        // 06:00 to 18:00
-    static constexpr uint8_t BRIGHTNESS_TWILIGHT = 30;    // 18:00 to 22:00
-    static constexpr uint8_t BRIGHTNESS_NIGHT = 20;       // 22:00 to 06:00
+    static constexpr uint8_t BRIGHTNESS_DAY = 80;      // 06:00 to 18:00
+    static constexpr uint8_t BRIGHTNESS_TWILIGHT = 10; // 18:00 to 22:00
+    static constexpr uint8_t BRIGHTNESS_NIGHT = 5;     // 22:00 to 06:00
 
     time_t now = time_manager_.get_timestamp_sec();
     struct tm timeinfo;
