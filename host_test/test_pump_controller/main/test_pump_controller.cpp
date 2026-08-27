@@ -17,6 +17,7 @@
 #include "mock_i_wifi_manager.hpp"
 #include "mock_i_ota_controller.hpp"
 #include "mock_i_ota_trigger.hpp"
+#include "mock_pump_command_handler.hpp"
 
 #include "secrets.hpp"
 
@@ -32,6 +33,7 @@ protected:
     NiceMock<MockNvsCore> nvs_core_;
     NiceMock<MockPumpNvs> pump_nvs_;
     NiceMock<MockPumpStateMachine> state_machine_;
+    NiceMock<MockPumpCommandHandler> command_handler_;
     NiceMock<espnow::MockEspNowManager> espnow_;
     NiceMock<time_manager::MockTimeManager> time_manager_;
     NiceMock<MockTankStripDisplay> display_;
@@ -47,7 +49,6 @@ protected:
 
     QueueHandle_t dummy_queue_ = reinterpret_cast<QueueHandle_t>(0x5678);
 
-    std::unique_ptr<PumpCommandHandler> command_handler_;
     std::unique_ptr<PumpController> sut_;
 
     void SetUp() override
@@ -86,6 +87,7 @@ protected:
         ON_CALL(espnow_, init(_)).WillByDefault(Return(ESP_OK));
         ON_CALL(hal_rtos_, queue_receive(_, _, _)).WillByDefault(Return(pdFALSE));
         ON_CALL(hal_rtos_, task_create(_, _, _, _, _, _)).WillByDefault(Return(pdPASS));
+        ON_CALL(command_handler_, process()).WillByDefault(Return(PumpCommandProcessResult{}));
 
         PumpStateSnapshot default_snapshot{
             .state = farm::LoadState::IDLE,
@@ -97,20 +99,12 @@ protected:
             .state_changed = false};
         ON_CALL(state_machine_, get_snapshot()).WillByDefault(Return(default_snapshot));
 
-        command_handler_ = std::make_unique<PumpCommandHandler>(
-            dummy_queue_,
-            espnow_,
-            state_machine_,
-            time_manager_,
-            display_,
-            hal_rtos_);
-
         sut_ = std::make_unique<PumpController>(
             dummy_queue_,
             nvs_core_,
             pump_nvs_,
             state_machine_,
-            *command_handler_,
+            command_handler_,
             status_reporter_,
             display_,
             switch_solar_,
@@ -298,18 +292,8 @@ TEST_F(PumpControllerTest, TickHandlesOperatorStopWhenPumpIsRunning)
 
 TEST_F(PumpControllerTest, TickHandlesRebootCommandGracefullyAndPersistsState)
 {
-    // Mock queue returning a REBOOT command
-    espnow::AppMessage reboot_msg{};
-    reboot_msg.msg_type = espnow::MessageType::COMMAND;
-    reboot_msg.payload_type = static_cast<uint8_t>(espnow::CommandType::REBOOT);
-    reboot_msg.requires_ack = false;
-
-    EXPECT_CALL(hal_rtos_, queue_receive(dummy_queue_, _, 0))
-        .WillOnce([reboot_msg](QueueHandle_t, void* buf, TickType_t) {
-            std::memcpy(buf, &reboot_msg, sizeof(reboot_msg));
-            return pdTRUE;
-        })
-        .WillRepeatedly(Return(pdFALSE));
+    EXPECT_CALL(command_handler_, process())
+        .WillOnce(Return(PumpCommandProcessResult{.reboot_requested = true}));
 
     EXPECT_CALL(nvs_core_, save_core(_, true)).Times(1);
     EXPECT_CALL(pump_nvs_, save_app_data(_, true)).Times(1);
@@ -321,17 +305,8 @@ TEST_F(PumpControllerTest, TickHandlesRebootCommandGracefullyAndPersistsState)
 
 TEST_F(PumpControllerTest, TickHandlesOtaCommandStopsPumpConnectsWiFiAndRestartsOnSuccess)
 {
-    espnow::AppMessage ota_msg{};
-    ota_msg.msg_type = espnow::MessageType::COMMAND;
-    ota_msg.payload_type = static_cast<uint8_t>(espnow::CommandType::START_OTA);
-    ota_msg.requires_ack = false;
-
-    EXPECT_CALL(hal_rtos_, queue_receive(dummy_queue_, _, 0))
-        .WillOnce([ota_msg](QueueHandle_t, void* buf, TickType_t) {
-            std::memcpy(buf, &ota_msg, sizeof(ota_msg));
-            return pdTRUE;
-        })
-        .WillRepeatedly(Return(pdFALSE));
+    EXPECT_CALL(command_handler_, process())
+        .WillOnce(Return(PumpCommandProcessResult{.ota_requested = true}));
 
     EXPECT_CALL(btn_trigger_, disarm()).Times(::testing::AtLeast(1));
     EXPECT_CALL(state_machine_, handle_operator_stop()).Times(1);
@@ -374,17 +349,8 @@ TEST_F(PumpControllerTest, ButtonOtaTriggerInvokesOtaFlowOnTick)
 
 TEST_F(PumpControllerTest, TickHandlesOtaCommandWiFiFailureSendsReportAndRearmsTrigger)
 {
-    espnow::AppMessage ota_msg{};
-    ota_msg.msg_type = espnow::MessageType::COMMAND;
-    ota_msg.payload_type = static_cast<uint8_t>(espnow::CommandType::START_OTA);
-    ota_msg.requires_ack = false;
-
-    EXPECT_CALL(hal_rtos_, queue_receive(dummy_queue_, _, 0))
-        .WillOnce([ota_msg](QueueHandle_t, void* buf, TickType_t) {
-            std::memcpy(buf, &ota_msg, sizeof(ota_msg));
-            return pdTRUE;
-        })
-        .WillRepeatedly(Return(pdFALSE));
+    EXPECT_CALL(command_handler_, process())
+        .WillOnce(Return(PumpCommandProcessResult{.ota_requested = true}));
 
     EXPECT_CALL(btn_trigger_, disarm()).Times(::testing::AtLeast(1));
     EXPECT_CALL(state_machine_, handle_operator_stop()).Times(1);
@@ -404,17 +370,8 @@ TEST_F(PumpControllerTest, TickHandlesOtaCommandWiFiFailureSendsReportAndRearmsT
 
 TEST_F(PumpControllerTest, TickHandlesOtaCommandDownloadFailureSendsReportAndRestoresScan)
 {
-    espnow::AppMessage ota_msg{};
-    ota_msg.msg_type = espnow::MessageType::COMMAND;
-    ota_msg.payload_type = static_cast<uint8_t>(espnow::CommandType::START_OTA);
-    ota_msg.requires_ack = false;
-
-    EXPECT_CALL(hal_rtos_, queue_receive(dummy_queue_, _, 0))
-        .WillOnce([ota_msg](QueueHandle_t, void* buf, TickType_t) {
-            std::memcpy(buf, &ota_msg, sizeof(ota_msg));
-            return pdTRUE;
-        })
-        .WillRepeatedly(Return(pdFALSE));
+    EXPECT_CALL(command_handler_, process())
+        .WillOnce(Return(PumpCommandProcessResult{.ota_requested = true}));
 
     EXPECT_CALL(btn_trigger_, disarm()).Times(::testing::AtLeast(1));
     EXPECT_CALL(state_machine_, handle_operator_stop()).Times(1);
@@ -458,10 +415,10 @@ TEST_F(PumpControllerTest, TickRuntimeAccountingIncrementsHourmeter)
 
 static time_t make_test_time(int hour)
 {
-    struct tm t = {};
-    t.tm_year = 126; // 2026
-    t.tm_mon = 7;    // August
-    t.tm_mday = 20;
+    struct tm t{};
+    t.tm_year = 2026 - 1900;
+    t.tm_mon = 5;
+    t.tm_mday = 15;
     t.tm_hour = hour;
     t.tm_min = 30;
     t.tm_sec = 0;
@@ -473,7 +430,7 @@ TEST_F(PumpControllerTest, TickUpdatesDisplayBrightnessToDayWhenSynchronized)
     EXPECT_CALL(time_manager_, is_synchronized()).WillRepeatedly(Return(true));
     EXPECT_CALL(time_manager_, get_timestamp_sec()).WillRepeatedly(Return(make_test_time(12))); // 12:30 (Day)
 
-    EXPECT_CALL(display_, set_brightness(180)).Times(1);
+    EXPECT_CALL(display_, set_brightness(80)).Times(1);
     sut_->tick(10000); // 10s check interval
 }
 
@@ -482,7 +439,7 @@ TEST_F(PumpControllerTest, TickUpdatesDisplayBrightnessToTwilightWhenSynchronize
     EXPECT_CALL(time_manager_, is_synchronized()).WillRepeatedly(Return(true));
     EXPECT_CALL(time_manager_, get_timestamp_sec()).WillRepeatedly(Return(make_test_time(19))); // 19:30 (Twilight)
 
-    EXPECT_CALL(display_, set_brightness(30)).Times(1);
+    EXPECT_CALL(display_, set_brightness(10)).Times(1);
     sut_->tick(10000);
 }
 
@@ -491,7 +448,7 @@ TEST_F(PumpControllerTest, TickUpdatesDisplayBrightnessToNightWhenSynchronized)
     EXPECT_CALL(time_manager_, is_synchronized()).WillRepeatedly(Return(true));
     EXPECT_CALL(time_manager_, get_timestamp_sec()).WillRepeatedly(Return(make_test_time(23))); // 23:30 (Night)
 
-    EXPECT_CALL(display_, set_brightness(20)).Times(1);
+    EXPECT_CALL(display_, set_brightness(5)).Times(1);
     sut_->tick(10000);
 }
 
@@ -502,4 +459,28 @@ TEST_F(PumpControllerTest, TickMaintainsDefaultBrightnessWhenUnsynchronized)
     // When unsynced, display stays on its hardware default; set_brightness is not invoked
     EXPECT_CALL(display_, set_brightness(_)).Times(0);
     sut_->tick(10000);
+}
+
+TEST_F(PumpControllerTest, TickDispatchesTimeSyncedFromCommandHandler)
+{
+    EXPECT_CALL(command_handler_, process())
+        .WillOnce(Return(PumpCommandProcessResult{.time_synced = true}));
+    EXPECT_CALL(time_manager_, is_synchronized()).WillRepeatedly(Return(true));
+    EXPECT_CALL(time_manager_, get_timestamp_ms()).WillRepeatedly(Return(1767225600000ULL));
+    EXPECT_CALL(nvs_core_, save_core(_, _)).Times(1);
+
+    sut_->tick(100);
+
+    EXPECT_TRUE(sut_->get_core_data().has_valid_time);
+    EXPECT_EQ(sut_->get_core_data().last_sync_unix_time_ms, 1767225600000ULL);
+}
+
+TEST_F(PumpControllerTest, TickDispatchesRebootFromCommandHandler)
+{
+    EXPECT_CALL(command_handler_, process())
+        .WillOnce(Return(PumpCommandProcessResult{.reboot_requested = true}));
+    EXPECT_CALL(state_machine_, handle_operator_stop()).Times(1);
+    EXPECT_CALL(hal_system_, restart()).Times(1);
+
+    sut_->tick(100);
 }

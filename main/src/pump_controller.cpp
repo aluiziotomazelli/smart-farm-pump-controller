@@ -31,7 +31,7 @@ PumpController::PumpController(
     INvsCore& core_storage,
     IPumpNvs& pump_storage,
     IPumpStateMachine& state_machine,
-    PumpCommandHandler& command_handler,
+    IPumpCommandHandler& command_handler,
     IPumpStatusReporter& status_reporter,
     ITankStripDisplay& display,
     ui_inputs::ISwitch& switch_solar,
@@ -112,8 +112,6 @@ esp_err_t PumpController::init()
         ESP_LOGE(TAG, "Failed to init time manager: %s", esp_err_to_name(err));
         session_healthy = false;
     }
-
-    command_handler_.set_core_data(core_);
 
     err = state_machine_.init();
     if (err != ESP_OK) {
@@ -281,7 +279,9 @@ void PumpController::tick(uint32_t delta_ms)
 
     // 3. Process Inbound Remote Commands
     PumpCommandProcessResult cmd_res = command_handler_.process();
-    if (cmd_res.core_modified) {
+    if (cmd_res.time_synced) {
+        core_.has_valid_time = time_manager_.is_synchronized();
+        core_.last_sync_unix_time_ms = time_manager_.get_timestamp_ms();
         pending_core_commit_ = true;
         core_storage_.save_core(core_, false);
     }

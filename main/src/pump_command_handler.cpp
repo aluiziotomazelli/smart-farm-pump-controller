@@ -21,15 +21,13 @@ PumpCommandHandler::PumpCommandHandler(
     IPumpStateMachine& state_machine,
     time_manager::ITimeManager& time_manager,
     ITankLevelDisplay& tank_display,
-    idf_hals::IHalFreertos& hal_freertos,
-    CoreData* core)
+    idf_hals::IHalFreertos& hal_freertos)
     : rx_queue_(rx_queue)
     , espnow_(espnow)
     , state_machine_(state_machine)
     , time_manager_(time_manager)
     , tank_display_(tank_display)
     , hal_freertos_(hal_freertos)
-    , core_(core)
 {
 }
 
@@ -108,11 +106,7 @@ void PumpCommandHandler::process_command_message(const espnow::AppMessage& msg, 
             const auto* packet = reinterpret_cast<const time_manager::TimeSyncPacket*>(msg.payload);
             esp_err_t err = time_manager_.sync_from_time_packet(*packet);
             if (err == ESP_OK) {
-                if (core_ != nullptr) {
-                    core_->has_valid_time = time_manager_.is_synchronized();
-                    core_->last_sync_unix_time_ms = time_manager_.get_timestamp_ms();
-                }
-                result.core_modified = true;
+                result.time_synced = true;
                 if (msg.requires_ack) {
                     espnow_.confirm_reception(msg.sender_id, msg.sequence_number, espnow::AckStatus::OK);
                 }

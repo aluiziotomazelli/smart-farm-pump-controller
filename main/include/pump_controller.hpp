@@ -18,7 +18,7 @@
 #include "interfaces/i_ota_controller.hpp"
 #include "interfaces/i_ota_trigger.hpp"
 #include "interfaces/i_espnow_manager.hpp"
-#include "pump_command_handler.hpp"
+#include "interfaces/i_pump_command_handler.hpp"
 #include "pump_stats.hpp"
 #include "core_types.hpp"
 
@@ -34,7 +34,7 @@ public:
         INvsCore& core_storage,
         IPumpNvs& pump_storage,
         IPumpStateMachine& state_machine,
-        PumpCommandHandler& command_handler,
+        IPumpCommandHandler& command_handler,
         IPumpStatusReporter& status_reporter,
         ITankStripDisplay& display,
         ui_inputs::ISwitch& switch_solar,
@@ -84,7 +84,7 @@ private:
     INvsCore& core_storage_;
     IPumpNvs& pump_storage_;
     IPumpStateMachine& state_machine_;
-    PumpCommandHandler& command_handler_;
+    IPumpCommandHandler& command_handler_;
     IPumpStatusReporter& status_reporter_;
     ITankStripDisplay& display_;
     ui_inputs::ISwitch& switch_solar_;

@@ -26,7 +26,6 @@ protected:
     NiceMock<time_manager::MockTimeManager> time_manager_;
     NiceMock<MockTankLevelDisplay> tank_display_;
     NiceMock<idf_hals::MockHalFreertos> hal_rtos_;
-    CoreData core_{};
     QueueHandle_t dummy_queue_ = reinterpret_cast<QueueHandle_t>(0x1234);
 
     std::unique_ptr<PumpCommandHandler> sut_;
@@ -46,8 +45,7 @@ protected:
             state_machine_,
             time_manager_,
             tank_display_,
-            hal_rtos_,
-            &core_);
+            hal_rtos_);
     }
 
     void SetupQueueWithMessages(const std::vector<espnow::AppMessage>& messages)
@@ -75,11 +73,10 @@ TEST_F(PumpCommandHandlerTest, NullQueueReturnsDefaultResult)
         state_machine_,
         time_manager_,
         tank_display_,
-        hal_rtos_,
-        &core_);
+        hal_rtos_);
 
     auto res = null_handler.process();
-    EXPECT_FALSE(res.core_modified);
+    EXPECT_FALSE(res.time_synced);
     EXPECT_FALSE(res.ota_requested);
     EXPECT_FALSE(res.reboot_requested);
 }
@@ -89,7 +86,7 @@ TEST_F(PumpCommandHandlerTest, EmptyQueueReturnsDefaultResult)
     EXPECT_CALL(hal_rtos_, queue_receive(dummy_queue_, _, 0)).WillOnce(Return(pdFALSE));
 
     auto res = sut_->process();
-    EXPECT_FALSE(res.core_modified);
+    EXPECT_FALSE(res.time_synced);
     EXPECT_FALSE(res.ota_requested);
     EXPECT_FALSE(res.reboot_requested);
 }
@@ -198,7 +195,7 @@ TEST_F(PumpCommandHandlerTest, ProcessLoadOffCommandDispatchesToStateMachineAndA
     sut_->process();
 }
 
-TEST_F(PumpCommandHandlerTest, ProcessSyncTimeCommandSynchronizesTimeAndUpdatesCore)
+TEST_F(PumpCommandHandlerTest, ProcessSyncTimeCommandSynchronizesTimeAndReturnsTimeSynced)
 {
     time_manager::TimeSyncPacket packet{
         .timestamp_ms = 1700000000000ULL,
@@ -221,9 +218,7 @@ TEST_F(PumpCommandHandlerTest, ProcessSyncTimeCommandSynchronizesTimeAndUpdatesC
     EXPECT_CALL(espnow_, confirm_reception(msg.sender_id, 99, espnow::AckStatus::OK)).Times(1);
 
     auto res = sut_->process();
-    EXPECT_TRUE(res.core_modified);
-    EXPECT_TRUE(core_.has_valid_time);
-    EXPECT_EQ(core_.last_sync_unix_time_ms, 1700000000000ULL);
+    EXPECT_TRUE(res.time_synced);
 }
 
 TEST_F(PumpCommandHandlerTest, ProcessTankLevelUpdateDispatchesToDisplayAndAcks)
