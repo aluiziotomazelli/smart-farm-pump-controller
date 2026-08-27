@@ -287,7 +287,7 @@ TEST_F(TankStripDisplayTest, SetLevelTriggersIdleSoftBreathingWave)
     display_->process_command(DisplayCommand{
         .type = DisplayCmdType::UPDATE_STATE,
         .state_data = {.state = farm::LoadState::IDLE, .mode = farm::ControlMode::AUTO, .source = farm::PowerSource::UNKNOWN}});
-    display_->process_frame(700);
+    display_->process_frame(2000);
 
     // New update received -> triggers breathing wave
     display_->process_command(DisplayCommand{
@@ -295,15 +295,15 @@ TEST_F(TankStripDisplayTest, SetLevelTriggersIdleSoftBreathingWave)
         .level_data = {.level_permille = 600, .backup_mode = false, .is_full = false}});
     captured_pixels_.clear();
 
-    // Halfway through breathing wave (300ms) -> value should be lower (dip to ~40%)
-    display_->process_frame(300);
+    // Halfway through breathing wave (900ms) -> value should be lower (dip)
+    display_->process_frame(900);
     ASSERT_GE(captured_pixels_.size(), 10);
     uint8_t dip_val = captured_pixels_[0].value;
     EXPECT_LT(dip_val, 200);
 
-    // Settle past wave (350ms more) -> value should be back to full static Cyan
+    // Settle past wave (1100ms more) -> value should be back to full static Cyan
     captured_pixels_.clear();
-    display_->process_frame(350);
+    display_->process_frame(1100);
     ASSERT_GE(captured_pixels_.size(), 10);
     uint8_t settled_val = captured_pixels_[0].value;
     EXPECT_GT(settled_val, dip_val);
@@ -542,7 +542,7 @@ TEST_F(TankStripDisplayTest, BrightnessScalesAllValueChannels)
     display_->process_command(DisplayCommand{
         .type = DisplayCmdType::UPDATE_STATE,
         .state_data = {.state = farm::LoadState::IDLE, .mode = farm::ControlMode::AUTO, .source = farm::PowerSource::UNKNOWN}});
-    display_->process_frame(700); // Past breathing
+    display_->process_frame(2000); // Past breathing
 
     // Set brightness to 50% (128/255)
     display_->process_command(DisplayCommand{.type = DisplayCmdType::SET_BRIGHTNESS, .brightness = 128});

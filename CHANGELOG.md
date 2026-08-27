@@ -5,6 +5,28 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.1] - 2026-08-27
+
+### Added
+- **`IPumpCommandHandler` Interface & Mock**:
+  - Extracted abstract interface [`IPumpCommandHandler`](file:///home/german/dev/workspaces/smart-farm/smart-farm-pump-controller/main/include/interfaces/i_pump_command_handler.hpp) with pure virtual `process()`.
+  - Created [`MockPumpCommandHandler`](file:///home/german/dev/workspaces/smart-farm/smart-farm-pump-controller/host_test/mocks/mock_pump_command_handler.hpp) enabling direct command response mocking in `PumpControllerTest`.
+- **100% Dependency Inversion in `PumpController`**:
+  - `PumpController` now receives `IPumpCommandHandler&` via Constructor Dependency Injection.
+
+### Changed
+- **Decoupled `PumpCommandHandler` from `CoreData`**:
+  - Removed `CoreData* core_` dependency and `set_core_data()` from `PumpCommandHandler`.
+  - Updated `PumpCommandProcessResult` to return `bool time_synced` upon successful `SYNC_TIME` processing.
+  - Centralized core storage mutation and persistence within `PumpController::tick()`.
+- **Visual Polish (`TankStripDisplay`)**:
+  - Adjusted idle packet confirmation breathing wave duration (`IDLE_BREATHE_DURATION_MS`) to 1800 ms.
+  - Adjusted chase offsets and full-tank pulsing values for enhanced visual contrast.
+- **Test Suite Updates**:
+  - Updated `test_pump_command_handler` and `test_pump_controller` unit tests for `time_synced` dispatch.
+  - Synchronized `test_tank_strip_display` frame durations with the updated 1800 ms breathing period.
+- Bumped firmware version to `0.3.1`.
+
 ## [0.3.0] - 2026-08-22
 
 ### Added
