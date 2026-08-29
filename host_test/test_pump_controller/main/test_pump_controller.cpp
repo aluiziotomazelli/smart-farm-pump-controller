@@ -311,6 +311,7 @@ TEST_F(PumpControllerTest, TickHandlesOtaCommandStopsPumpConnectsWiFiAndRestarts
     EXPECT_CALL(btn_trigger_, disarm()).Times(::testing::AtLeast(1));
     EXPECT_CALL(state_machine_, handle_operator_stop()).Times(1);
     EXPECT_CALL(display_, set_override_pattern(TankStripPattern::OTA_UPDATING)).Times(1);
+    EXPECT_CALL(espnow_, deinit()).Times(1);
     EXPECT_CALL(mock_wifi_, connect(15000, 3, 1500)).WillOnce(Return(ESP_OK));
 
     OtaActionResult download_ok{.success = true, .exec_result = farm::OtaExecResult::CONFIRMED_SUCCESS, .error_code = farm::OtaErrorCode::NONE};
@@ -333,6 +334,7 @@ TEST_F(PumpControllerTest, ButtonOtaTriggerInvokesOtaFlowOnTick)
     EXPECT_CALL(btn_trigger_, disarm()).Times(::testing::AtLeast(1));
     EXPECT_CALL(state_machine_, handle_operator_stop()).Times(1);
     EXPECT_CALL(display_, set_override_pattern(TankStripPattern::OTA_UPDATING)).Times(1);
+    EXPECT_CALL(espnow_, deinit()).Times(1);
     EXPECT_CALL(mock_wifi_, connect(15000, 3, 1500)).WillOnce(Return(ESP_OK));
 
     OtaActionResult download_ok{.success = true, .exec_result = farm::OtaExecResult::CONFIRMED_SUCCESS, .error_code = farm::OtaErrorCode::NONE};
@@ -355,9 +357,10 @@ TEST_F(PumpControllerTest, TickHandlesOtaCommandWiFiFailureSendsReportAndRearmsT
     EXPECT_CALL(btn_trigger_, disarm()).Times(::testing::AtLeast(1));
     EXPECT_CALL(state_machine_, handle_operator_stop()).Times(1);
     EXPECT_CALL(display_, set_override_pattern(TankStripPattern::OTA_UPDATING)).Times(1);
-    EXPECT_CALL(espnow_, set_channel_policy(espnow::ChannelPolicy::FIXED)).Times(1);
+    EXPECT_CALL(espnow_, deinit()).Times(1);
     EXPECT_CALL(mock_wifi_, connect(15000, 3, 1500)).WillOnce(Return(ESP_FAIL));
     EXPECT_CALL(mock_wifi_, disconnect(2000)).WillOnce(Return(ESP_OK));
+    EXPECT_CALL(espnow_, init(_)).WillOnce(Return(ESP_OK));
     EXPECT_CALL(espnow_, set_channel_policy(espnow::ChannelPolicy::SCAN)).Times(1);
 
     EXPECT_CALL(espnow_, send_data(espnow::ReservedIds::HUB, static_cast<uint8_t>(farm::PayloadType::OTA_STATUS_REPORT), _, _, true))
@@ -376,13 +379,14 @@ TEST_F(PumpControllerTest, TickHandlesOtaCommandDownloadFailureSendsReportAndRes
     EXPECT_CALL(btn_trigger_, disarm()).Times(::testing::AtLeast(1));
     EXPECT_CALL(state_machine_, handle_operator_stop()).Times(1);
     EXPECT_CALL(display_, set_override_pattern(TankStripPattern::OTA_UPDATING)).Times(1);
-    EXPECT_CALL(espnow_, set_channel_policy(espnow::ChannelPolicy::FIXED)).Times(1);
+    EXPECT_CALL(espnow_, deinit()).Times(1);
     EXPECT_CALL(mock_wifi_, connect(15000, 3, 1500)).WillOnce(Return(ESP_OK));
 
     OtaActionResult download_fail{.success = false, .exec_result = farm::OtaExecResult::DOWNLOAD_FAILED, .error_code = farm::OtaErrorCode::HTTP_DOWNLOAD_FAILED};
     EXPECT_CALL(mock_ota_, execute_download(60000)).WillOnce(Return(download_fail));
 
     EXPECT_CALL(mock_wifi_, disconnect(2000)).WillOnce(Return(ESP_OK));
+    EXPECT_CALL(espnow_, init(_)).WillOnce(Return(ESP_OK));
     EXPECT_CALL(espnow_, set_channel_policy(espnow::ChannelPolicy::SCAN)).Times(1);
     EXPECT_CALL(espnow_, send_data(espnow::ReservedIds::HUB, static_cast<uint8_t>(farm::PayloadType::OTA_STATUS_REPORT), _, _, true))
         .WillOnce(Return(ESP_OK));

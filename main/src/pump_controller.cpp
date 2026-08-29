@@ -279,6 +279,7 @@ void PumpController::tick(uint32_t delta_ms)
 
     // 3. Process Inbound Remote Commands
     PumpCommandProcessResult cmd_res = command_handler_.process();
+    // TODO: make a helper function to handle command result
     if (cmd_res.time_synced) {
         core_.has_valid_time = time_manager_.is_synchronized();
         core_.last_sync_unix_time_ms = time_manager_.get_timestamp_ms();
@@ -504,43 +505,53 @@ void PumpController::process_pending_ota()
     // 2. Visual feedback on addressable strip
     display_.set_override_pattern(TankStripPattern::OTA_UPDATING);
 
-    // 3. Connect to WiFi with sync retries
-    ESP_LOGI(TAG, "Connecting to WiFi for OTA download (timeout: 15000 ms, max_retries: 3)...");
-    espnow_.set_channel_policy(espnow::ChannelPolicy::FIXED);
-    espnow_.set_enable_heartbeat(false);
-    esp_err_t wifi_err = wifi_manager_.connect(15000, 3, 1500);
-    if (wifi_err != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to connect to WiFi for OTA (%s)", esp_err_to_name(wifi_err));
-        wifi_manager_.disconnect(2000);
-        espnow_.set_channel_policy(espnow::ChannelPolicy::SCAN);
-        espnow_.set_enable_heartbeat(true);
-        send_ota_report(farm::OtaExecResult::DOWNLOAD_FAILED, farm::OtaErrorCode::WIFI_CONNECT_FAILED);
-        display_.set_override_pattern(TankStripPattern::AUTO);
-        btn_trigger_.arm(*this);
-        return;
+    // 3. Deinitialize ESP-NOW to free heap and eliminate RF contention during download
+    espnow_.deinit();
+
+    bool previous_connected = (wifi_manager_.get_state() == wifi_manager::State::CONNECTED_GOT_IP);
+    bool wifi_ok = previous_connected;
+
+    // 4. Connect to WiFi with sync retries if not already connected
+    if (!previous_connected) {
+        ESP_LOGI(TAG, "Connecting to WiFi for OTA download (timeout: 15000 ms, max_retries: 3)...");
+        wifi_ok = (wifi_manager_.connect(15000, 3, 1500) == ESP_OK);
     }
 
-    // 4. Execute OTA download
-    OtaActionResult result = ota_controller_.execute_download();
-    if (result.success) {
-        ESP_LOGI(TAG, "OTA download succeeded! Persisting state and restarting...");
-        pending_core_commit_ = true;
-        pending_controller_commit_ = true;
-        save_persistent_state(true);
-        wifi_manager_.disconnect(2000);
-        wifi_manager_.stop(2000);
-        hal_system_.restart();
-        return;
+    OtaActionResult result = {};
+
+    if (wifi_ok) {
+        result = ota_controller_.execute_download();
+        if (result.success) {
+            ESP_LOGI(TAG, "OTA download succeeded! Persisting state and restarting...");
+            pending_core_commit_ = true;
+            pending_controller_commit_ = true;
+            save_persistent_state(true);
+            wifi_manager_.disconnect(2000);
+            wifi_manager_.stop(2000);
+            hal_system_.restart();
+            return;
+        }
+        ESP_LOGE(TAG, "OTA download failed (error_code: %d)", static_cast<int>(result.error_code));
     }
     else {
-        ESP_LOGE(TAG, "OTA download failed (error_code: %d)", static_cast<int>(result.error_code));
-        wifi_manager_.disconnect(2000);
-        espnow_.set_channel_policy(espnow::ChannelPolicy::SCAN);
-        espnow_.set_enable_heartbeat(true);
-        send_ota_report(result.exec_result, result.error_code);
-        display_.set_override_pattern(TankStripPattern::AUTO);
-        btn_trigger_.arm(*this);
+        ESP_LOGE(TAG, "Failed to connect to WiFi for OTA");
+        result.success = false;
+        result.exec_result = farm::OtaExecResult::DOWNLOAD_FAILED;
+        result.error_code = farm::OtaErrorCode::WIFI_CONNECT_FAILED;
     }
+
+    // Restore components if update did not result in reboot
+    if (!previous_connected) {
+        wifi_manager_.disconnect(2000);
+    }
+
+    if (init_espnow() == ESP_OK) {
+        espnow_.set_channel_policy(previous_connected ? espnow::ChannelPolicy::FIXED : espnow::ChannelPolicy::SCAN);
+        send_ota_report(result.exec_result, result.error_code);
+    }
+
+    display_.set_override_pattern(TankStripPattern::AUTO);
+    btn_trigger_.arm(*this);
 }
 
 esp_err_t PumpController::send_ota_report(farm::OtaExecResult result, farm::OtaErrorCode error_code)
