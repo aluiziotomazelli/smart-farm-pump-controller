@@ -92,7 +92,8 @@ protected:
         PumpStateSnapshot default_snapshot{
             .state = farm::LoadState::IDLE,
             .mode = farm::ControlMode::AUTO,
-            .source = farm::PowerSource::UNKNOWN,
+            .selected_source = farm::PowerSource::AUTO,
+            .active_source = farm::PowerSource::UNKNOWN,
             .power_w = 0,
             .runtime_s = 0,
             .remaining_watchdog_s = 0,
@@ -214,7 +215,8 @@ TEST_F(PumpControllerTest, TickSamplesCenterSwitchAutoModeAndSendsFillRequestOnB
     PumpStateSnapshot idle_snapshot{
         .state = farm::LoadState::IDLE,
         .mode = farm::ControlMode::AUTO,
-        .source = farm::PowerSource::UNKNOWN,
+        .selected_source = farm::PowerSource::AUTO,
+        .active_source = farm::PowerSource::UNKNOWN,
         .power_w = 0,
         .runtime_s = 0,
         .remaining_watchdog_s = 0,
@@ -226,7 +228,7 @@ TEST_F(PumpControllerTest, TickSamplesCenterSwitchAutoModeAndSendsFillRequestOnB
 
     EXPECT_CALL(state_machine_, tick(50)).Times(1);
     EXPECT_CALL(status_reporter_, tick(50)).Times(1);
-    EXPECT_CALL(display_, update_state(farm::LoadState::IDLE, farm::ControlMode::AUTO, farm::PowerSource::UNKNOWN)).Times(1);
+    EXPECT_CALL(display_, update_state(farm::LoadState::IDLE, farm::ControlMode::AUTO, farm::PowerSource::AUTO)).Times(1);
 
     sut_->tick(50);
 }
@@ -242,8 +244,9 @@ TEST_F(PumpControllerTest, TickSamplesSolarSwitchAndHandlesOperatorStartWhenOff)
     EXPECT_CALL(button_action_, get_last_click()).WillOnce(Return(ui_inputs::ButtonClickType::CLICK));
     PumpStateSnapshot idle_snapshot{
         .state = farm::LoadState::IDLE,
-        .mode = farm::ControlMode::SOURCE_LOCKED,
-        .source = farm::PowerSource::SOLAR,
+        .mode = farm::ControlMode::AUTO,
+        .selected_source = farm::PowerSource::SOLAR,
+        .active_source = farm::PowerSource::UNKNOWN,
         .power_w = 0,
         .runtime_s = 0,
         .remaining_watchdog_s = 0,
@@ -277,8 +280,9 @@ TEST_F(PumpControllerTest, TickHandlesOperatorStopWhenPumpIsRunning)
     EXPECT_CALL(button_action_, get_last_click()).WillOnce(Return(ui_inputs::ButtonClickType::CLICK));
     PumpStateSnapshot running_snapshot{
         .state = farm::LoadState::RUNNING,
-        .mode = farm::ControlMode::STOP_OVERRIDE,
-        .source = farm::PowerSource::SOLAR,
+        .mode = farm::ControlMode::MANUAL_RUN,
+        .selected_source = farm::PowerSource::SOLAR,
+        .active_source = farm::PowerSource::SOLAR,
         .power_w = 320,
         .runtime_s = 15,
         .remaining_watchdog_s = 0,
@@ -401,7 +405,8 @@ TEST_F(PumpControllerTest, TickRuntimeAccountingIncrementsHourmeter)
     PumpStateSnapshot running_snapshot{
         .state = farm::LoadState::RUNNING,
         .mode = farm::ControlMode::AUTO,
-        .source = farm::PowerSource::SOLAR,
+        .selected_source = farm::PowerSource::AUTO,
+        .active_source = farm::PowerSource::SOLAR,
         .power_w = 320,
         .runtime_s = 10,
         .remaining_watchdog_s = 3590,

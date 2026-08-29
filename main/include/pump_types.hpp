@@ -25,7 +25,8 @@ struct PumpStateSnapshot
 {
     farm::LoadState state{farm::LoadState::IDLE};
     farm::ControlMode mode{farm::ControlMode::AUTO};
-    farm::PowerSource source{farm::PowerSource::UNKNOWN};
+    farm::PowerSource selected_source{farm::PowerSource::AUTO};
+    farm::PowerSource active_source{farm::PowerSource::UNKNOWN};
     uint16_t power_w{0};
     uint32_t runtime_s{0};
     uint32_t remaining_watchdog_s{0};

@@ -173,9 +173,9 @@ TEST_F(PumpStateMachineTest, ErrorTimeoutRecoversWithFreshLoadOn)
 TEST_F(PumpStateMachineTest, SourceLockEnforcesSourceLockedModeAndLocksLoadOnSource)
 {
     sut_->set_source_lock(farm::PowerSource::SOLAR);
-    EXPECT_EQ(sut_->get_control_mode(), farm::ControlMode::SOURCE_LOCKED);
+    EXPECT_EQ(sut_->get_control_mode(), farm::ControlMode::AUTO);
     EXPECT_EQ(sut_->get_locked_source(), farm::PowerSource::SOLAR);
-    EXPECT_EQ(sut_->get_active_source(), farm::PowerSource::SOLAR);
+    EXPECT_EQ(sut_->get_snapshot().selected_source, farm::PowerSource::SOLAR);
 
     // Hub sends LOAD_ON requesting GRID, but pump locks and activates SOLAR
     farm::LoadOnCommand on_cmd{
@@ -189,12 +189,12 @@ TEST_F(PumpStateMachineTest, SourceLockEnforcesSourceLockedModeAndLocksLoadOnSou
     EXPECT_EQ(sut_->get_active_source(), farm::PowerSource::SOLAR);
 }
 
-TEST_F(PumpStateMachineTest, OperatorStartTransitionsToStopOverrideMode)
+TEST_F(PumpStateMachineTest, OperatorStartTransitionsToManualRunMode)
 {
     EXPECT_CALL(contactor_, activate(farm::PowerSource::SOLAR)).WillOnce(Return(ESP_OK));
     EXPECT_EQ(sut_->handle_operator_start(farm::PowerSource::SOLAR), ESP_OK);
     EXPECT_EQ(sut_->get_state(), farm::LoadState::RUNNING);
-    EXPECT_EQ(sut_->get_control_mode(), farm::ControlMode::STOP_OVERRIDE);
+    EXPECT_EQ(sut_->get_control_mode(), farm::ControlMode::MANUAL_RUN);
     EXPECT_EQ(sut_->get_active_source(), farm::PowerSource::SOLAR);
     EXPECT_EQ(sut_->get_snapshot().power_w, 320);
 
@@ -204,11 +204,11 @@ TEST_F(PumpStateMachineTest, OperatorStartTransitionsToStopOverrideMode)
     EXPECT_EQ(sut_->get_control_mode(), farm::ControlMode::AUTO);
 }
 
-TEST_F(PumpStateMachineTest, StopOverrideRejectsLoadOnButAcceptsLoadOffFromHub)
+TEST_F(PumpStateMachineTest, ManualRunRejectsLoadOnButAcceptsLoadOffFromHub)
 {
     EXPECT_CALL(contactor_, activate(farm::PowerSource::GRID)).WillOnce(Return(ESP_OK));
     EXPECT_EQ(sut_->handle_operator_start(farm::PowerSource::GRID), ESP_OK);
-    EXPECT_EQ(sut_->get_control_mode(), farm::ControlMode::STOP_OVERRIDE);
+    EXPECT_EQ(sut_->get_control_mode(), farm::ControlMode::MANUAL_RUN);
 
     // Hub tries to send LOAD_ON -> rejected
     farm::LoadOnCommand on_cmd{
@@ -240,7 +240,9 @@ TEST_F(PumpStateMachineTest, HotSwitchFromSolarToGridWhileRunningOnHubCycle)
     EXPECT_CALL(contactor_, activate(farm::PowerSource::GRID)).WillOnce(Return(ESP_OK));
     sut_->set_source_lock(farm::PowerSource::GRID);
 
-    EXPECT_EQ(sut_->get_control_mode(), farm::ControlMode::SOURCE_LOCKED);
+    EXPECT_EQ(sut_->get_control_mode(), farm::ControlMode::AUTO);
+    EXPECT_EQ(sut_->get_locked_source(), farm::PowerSource::GRID);
+    EXPECT_EQ(sut_->get_snapshot().selected_source, farm::PowerSource::GRID);
     EXPECT_EQ(sut_->get_active_source(), farm::PowerSource::GRID);
     EXPECT_EQ(sut_->get_state(), farm::LoadState::RUNNING);
 
@@ -263,7 +265,9 @@ TEST_F(PumpStateMachineTest, HotSwitchFromGridToSolarWhileRunningOnHubCycle)
     EXPECT_CALL(contactor_, activate(farm::PowerSource::SOLAR)).WillOnce(Return(ESP_OK));
     sut_->set_source_lock(farm::PowerSource::SOLAR);
 
-    EXPECT_EQ(sut_->get_control_mode(), farm::ControlMode::SOURCE_LOCKED);
+    EXPECT_EQ(sut_->get_control_mode(), farm::ControlMode::AUTO);
+    EXPECT_EQ(sut_->get_locked_source(), farm::PowerSource::SOLAR);
+    EXPECT_EQ(sut_->get_snapshot().selected_source, farm::PowerSource::SOLAR);
     EXPECT_EQ(sut_->get_active_source(), farm::PowerSource::SOLAR);
     EXPECT_EQ(sut_->get_state(), farm::LoadState::RUNNING);
 }

@@ -307,7 +307,7 @@ void PumpController::tick(uint32_t delta_ms)
 
     // 5. Update Visual Feedback on Addressable Strip & Runtime Accounting
     auto snapshot = state_machine_.get_snapshot();
-    display_.update_state(snapshot.state, snapshot.mode, snapshot.source);
+    display_.update_state(snapshot.state, snapshot.mode, snapshot.selected_source);
     update_display_brightness(delta_ms);
 
     if (snapshot.state == farm::LoadState::RUNNING) {
@@ -315,7 +315,7 @@ void PumpController::tick(uint32_t delta_ms)
         while (runtime_accumulator_ms_ >= 1000) {
             runtime_accumulator_ms_ -= 1000;
             stats_.total_runtime_s++;
-            if (snapshot.source == farm::PowerSource::SOLAR) {
+            if (snapshot.active_source == farm::PowerSource::SOLAR) {
                 stats_.solar_runtime_s++;
             }
             else {
@@ -441,6 +441,7 @@ esp_err_t PumpController::init_espnow()
     config.node_id = static_cast<espnow::NodeId>(farm::NodeId::PUMP_CONTROL);
     config.node_type = static_cast<espnow::NodeType>(farm::NodeType::ACTUATOR);
     config.app_rx_queue = rx_queue_;
+    config.ack_timeout_ms = 500;
     config.wifi_channel = 1;
     config.heartbeat_interval_ms = 3 * 60 * 1000; // 3 minutes
     config.enable_heartbeat = true;

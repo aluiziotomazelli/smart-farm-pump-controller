@@ -43,7 +43,8 @@ protected:
         PumpStateSnapshot default_snapshot{
             .state = farm::LoadState::RUNNING,
             .mode = farm::ControlMode::AUTO,
-            .source = farm::PowerSource::SOLAR,
+            .selected_source = farm::PowerSource::AUTO,
+            .active_source = farm::PowerSource::SOLAR,
             .power_w = 320,
             .runtime_s = 120,
             .remaining_watchdog_s = 180,
@@ -81,7 +82,8 @@ TEST_F(PumpStatusReporterTest, SendStatusReportFormatsAndTransmitsPayload)
     EXPECT_EQ(captured_status.circuit_id, 0);
     EXPECT_EQ(captured_status.power_profile, farm::PowerProfile::ALWAYS_ON);
     EXPECT_EQ(captured_status.control_mode, farm::ControlMode::AUTO);
-    EXPECT_EQ(captured_status.active_power_source, farm::PowerSource::SOLAR);
+    EXPECT_EQ(captured_status.selected_source, farm::PowerSource::AUTO);
+    EXPECT_EQ(captured_status.active_source, farm::PowerSource::SOLAR);
     EXPECT_EQ(captured_status.load_state, farm::LoadState::RUNNING);
     EXPECT_EQ(captured_status.power_w, 320);
     EXPECT_EQ(captured_status.runtime_s, 120);
@@ -104,7 +106,8 @@ TEST_F(PumpStatusReporterTest, IdleTickDoesNotSendPeriodicReport)
     PumpStateSnapshot idle_snapshot{
         .state = farm::LoadState::IDLE,
         .mode = farm::ControlMode::AUTO,
-        .source = farm::PowerSource::SOLAR,
+        .selected_source = farm::PowerSource::AUTO,
+        .active_source = farm::PowerSource::UNKNOWN,
         .power_w = 0,
         .runtime_s = 0,
         .remaining_watchdog_s = 0,
@@ -174,7 +177,8 @@ TEST_F(PumpStatusReporterTest, StateTransitionToRunningDisablesHeartbeat)
     PumpStateSnapshot running_snapshot{
         .state = farm::LoadState::RUNNING,
         .mode = farm::ControlMode::AUTO,
-        .source = farm::PowerSource::SOLAR,
+        .selected_source = farm::PowerSource::AUTO,
+        .active_source = farm::PowerSource::SOLAR,
         .power_w = 320,
         .runtime_s = 0,
         .remaining_watchdog_s = 180,
@@ -192,7 +196,8 @@ TEST_F(PumpStatusReporterTest, StateTransitionToIdleEnablesHeartbeat)
     PumpStateSnapshot idle_snapshot{
         .state = farm::LoadState::IDLE,
         .mode = farm::ControlMode::AUTO,
-        .source = farm::PowerSource::SOLAR,
+        .selected_source = farm::PowerSource::AUTO,
+        .active_source = farm::PowerSource::UNKNOWN,
         .power_w = 0,
         .runtime_s = 0,
         .remaining_watchdog_s = 0,
@@ -209,8 +214,9 @@ TEST_F(PumpStatusReporterTest, ExplicitNotifyStateChangeUpdatesHeartbeatState)
 {
     PumpStateSnapshot running_snapshot{
         .state = farm::LoadState::RUNNING,
-        .mode = farm::ControlMode::STOP_OVERRIDE,
-        .source = farm::PowerSource::GRID,
+        .mode = farm::ControlMode::MANUAL_RUN,
+        .selected_source = farm::PowerSource::GRID,
+        .active_source = farm::PowerSource::GRID,
         .power_w = 320,
         .runtime_s = 10,
         .remaining_watchdog_s = 100,
