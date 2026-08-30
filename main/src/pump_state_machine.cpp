@@ -173,7 +173,13 @@ void PumpStateMachine::set_source_lock(farm::PowerSource source)
     locked_source_ = source;
     ESP_LOGI(TAG, "Locked source updated to: %d", static_cast<int>(source));
 
-    if (state_ == farm::LoadState::RUNNING && locked_source_ != farm::PowerSource::UNKNOWN && locked_source_ != farm::PowerSource::AUTO) {
+    if (locked_source_ == farm::PowerSource::UNKNOWN || locked_source_ == farm::PowerSource::AUTO) {
+        if (control_mode_ == farm::ControlMode::MANUAL_RUN) {
+            ESP_LOGI(TAG, "Source lock released (switched to AUTO) -> returning control_mode to AUTO");
+            control_mode_ = farm::ControlMode::AUTO;
+        }
+    }
+    else if (state_ == farm::LoadState::RUNNING) {
         if (active_source_ != locked_source_) {
             ESP_LOGI(TAG, "Hot-switching source from %d to %d while RUNNING", static_cast<int>(active_source_), static_cast<int>(locked_source_));
             esp_err_t err = contactor_.activate(locked_source_);
