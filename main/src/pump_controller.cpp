@@ -426,7 +426,7 @@ esp_err_t PumpController::init_ota()
     ota_cfg.transport.manifest_timeout_ms = 10000;
     ota_cfg.transport.firmware_timeout_ms = 30000;
     ota_cfg.security.allow_http_during_development = true;
-    ota_cfg.allow_same_version = true;
+    ota_cfg.allow_same_version = true; // TODO: change to false in production
     ota_cfg.restart_on_success = false;
 
     if (!ota_controller_.init(ota_cfg)) {
