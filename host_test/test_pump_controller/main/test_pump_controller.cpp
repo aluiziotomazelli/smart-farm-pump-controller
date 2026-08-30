@@ -195,7 +195,7 @@ TEST_F(PumpControllerTest, InitTimeManagerFailureMarksSessionUnhealthy)
 
 TEST_F(PumpControllerTest, StartLaunchesTask)
 {
-    EXPECT_CALL(hal_rtos_, task_create(_, ::testing::StrEq("pump_ctrl_task"), 4096, _, 5, _))
+    EXPECT_CALL(hal_rtos_, task_create(_, ::testing::StrEq("pump_ctrl_task"), 8192, _, 5, _))
         .WillOnce(Return(pdPASS));
 
     EXPECT_EQ(sut_->start(), ESP_OK);

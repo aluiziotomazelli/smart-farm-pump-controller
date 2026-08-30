@@ -196,7 +196,8 @@ esp_err_t PumpController::init()
 esp_err_t PumpController::start()
 {
     is_running_ = true;
-    BaseType_t res = hal_rtos_.task_create(task_entry, "pump_ctrl_task", 4096, this, 5, &task_handle_);
+    static constexpr uint32_t PUMP_CTRL_TASK_STACK_SIZE = 8192;
+    BaseType_t res = hal_rtos_.task_create(task_entry, "pump_ctrl_task", PUMP_CTRL_TASK_STACK_SIZE, this, 5, &task_handle_);
 
     if (res != pdPASS) {
         ESP_LOGE(TAG, "Failed to create PumpController task");
@@ -518,10 +519,16 @@ void PumpController::process_pending_ota()
         wifi_ok = (wifi_manager_.connect(15000, 3, 1500) == ESP_OK);
     }
 
+    UBaseType_t stack_free_bytes = hal_rtos_.task_get_stack_high_water_mark(nullptr);
+    ESP_LOGI(TAG, "Stack High Water Mark before OTA download: %u bytes remaining", static_cast<unsigned>(stack_free_bytes));
+
     OtaActionResult result = {};
 
     if (wifi_ok) {
         result = ota_controller_.execute_download();
+        stack_free_bytes = hal_rtos_.task_get_stack_high_water_mark(nullptr);
+        ESP_LOGI(TAG, "Stack High Water Mark after OTA download: %u bytes remaining", static_cast<unsigned>(stack_free_bytes));
+
         if (result.success) {
             ESP_LOGI(TAG, "OTA download succeeded! Persisting state and restarting...");
             pending_core_commit_ = true;
