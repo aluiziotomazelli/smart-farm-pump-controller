@@ -308,7 +308,9 @@ void PumpController::tick(uint32_t delta_ms)
 
     // 5. Update Visual Feedback on Addressable Strip & Runtime Accounting
     auto snapshot = state_machine_.get_snapshot();
-    display_.update_state(snapshot.state, snapshot.mode, snapshot.selected_source);
+    farm::PowerSource display_source =
+        (snapshot.state == farm::LoadState::RUNNING) ? snapshot.active_source : snapshot.selected_source;
+    display_.update_state(snapshot.state, snapshot.mode, display_source);
     update_display_brightness(delta_ms);
 
     if (snapshot.state == farm::LoadState::RUNNING) {
