@@ -5,6 +5,30 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.3] - 2026-08-30
+
+### Added
+- **Continuous Output Validation with Stabilization Delay (`PumpStateMachine`)**:
+  - Implemented a 500 ms mechanical stabilization grace period upon contactor actuation before evaluating output voltage presence to prevent false-negative trips during relay/contactor pull-in.
+  - Added continuous output monitoring in `PumpStateMachine::tick()`:
+    - **`IDLE` state:** Immediately detects unexpected voltage across motor terminals (`has_any_output_energy() == true`) and transitions to `ERROR_CONTACTOR_STUCK` (protecting against welded/stuck contactor contacts).
+    - **`RUNNING` state (post-stabilization):** Detects loss of output voltage (`!has_any_output_energy()`), automatically deactivates coil drivers, and transitions safely to `ERROR_NO_SOURCE` (loss of grid/solar power or tripped breaker).
+- **Comprehensive Unit Tests**:
+  - Added test cases in `test_pump_state_machine` validating:
+    - Source lock changes in `AUTO` mode safely de-energizing the load.
+    - Immediate hot-switching in `MANUAL_RUN` mode.
+    - Spontaneous contactor stuck detection in `IDLE`.
+    - Voltage loss detection after the 500 ms stabilization window.
+
+### Changed
+- **AUTO Mode Source Lock Transition Safety**:
+  - Changing the physical source selector switch to a specific source (`SOLAR` or `GRID`) while running in `AUTO` mode now deactivates the active contactor safely and enters `IDLE` to notify the Hub for coordinated re-arbitration, preventing blind contactor chattering/energization into unpowered sources.
+- **Safety Interlock & Demagnetization Timing**:
+  - Increased `ContactorConfig::demagnetization_delay_ms` default to **500 ms** for robust arc-extinction, back-EMF discharge, and break-before-make source transfer.
+  - Eliminated duplicate `demagnetization_delay_ms` from `PumpStateMachineConfig` to establish `ContactorConfig` as the single source of truth.
+- **Simplified `IOutputMonitor` Interface**:
+  - Streamlined `IOutputMonitor` to `has_any_output_energy()` for direct, robust terminal voltage validation across all grounding topologies.
+
 ## [0.3.1] - 2026-08-27
 
 ### Added

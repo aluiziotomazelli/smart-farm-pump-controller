@@ -236,38 +236,30 @@ TEST_F(PumpStateMachineTest, HotSwitchFromSolarToGridWhileRunningOnHubCycle)
     EXPECT_EQ(sut_->get_control_mode(), farm::ControlMode::AUTO);
     EXPECT_EQ(sut_->get_active_source(), farm::PowerSource::SOLAR);
 
-    // Operator turns switch to GRID while running
-    EXPECT_CALL(contactor_, activate(farm::PowerSource::GRID)).WillOnce(Return(ESP_OK));
+    // Operator turns switch to GRID while running in AUTO mode -> deactivates and enters IDLE to notify Hub
+    EXPECT_CALL(contactor_, deactivate()).WillOnce(Return(ESP_OK));
     sut_->set_source_lock(farm::PowerSource::GRID);
 
     EXPECT_EQ(sut_->get_control_mode(), farm::ControlMode::AUTO);
     EXPECT_EQ(sut_->get_locked_source(), farm::PowerSource::GRID);
     EXPECT_EQ(sut_->get_snapshot().selected_source, farm::PowerSource::GRID);
-    EXPECT_EQ(sut_->get_active_source(), farm::PowerSource::GRID);
-    EXPECT_EQ(sut_->get_state(), farm::LoadState::RUNNING);
-
-    // Watchdog continues ticking
-    sut_->tick(10000);
-    EXPECT_EQ(sut_->get_snapshot().remaining_watchdog_s, 90);
+    EXPECT_EQ(sut_->get_active_source(), farm::PowerSource::UNKNOWN);
+    EXPECT_EQ(sut_->get_state(), farm::LoadState::IDLE);
 }
 
-TEST_F(PumpStateMachineTest, HotSwitchFromGridToSolarWhileRunningOnHubCycle)
+TEST_F(PumpStateMachineTest, HotSwitchInManualRunModePerformsImmediateSwitch)
 {
-    // Hub starts on GRID
-    farm::LoadOnCommand on_cmd{
-        .circuit_id = 0,
-        .power_source = farm::PowerSource::GRID,
-        .watchdog_timeout_s = 100};
+    // Operator starts on GRID manually
     EXPECT_CALL(contactor_, activate(farm::PowerSource::GRID)).WillOnce(Return(ESP_OK));
-    EXPECT_EQ(sut_->handle_load_on(on_cmd), ESP_OK);
+    EXPECT_EQ(sut_->handle_operator_start(farm::PowerSource::GRID), ESP_OK);
+    EXPECT_EQ(sut_->get_control_mode(), farm::ControlMode::MANUAL_RUN);
 
-    // Operator turns switch to SOLAR while running
+    // Operator turns switch to SOLAR while in MANUAL_RUN -> immediate hot-switch
     EXPECT_CALL(contactor_, activate(farm::PowerSource::SOLAR)).WillOnce(Return(ESP_OK));
     sut_->set_source_lock(farm::PowerSource::SOLAR);
 
-    EXPECT_EQ(sut_->get_control_mode(), farm::ControlMode::AUTO);
+    EXPECT_EQ(sut_->get_control_mode(), farm::ControlMode::MANUAL_RUN);
     EXPECT_EQ(sut_->get_locked_source(), farm::PowerSource::SOLAR);
-    EXPECT_EQ(sut_->get_snapshot().selected_source, farm::PowerSource::SOLAR);
     EXPECT_EQ(sut_->get_active_source(), farm::PowerSource::SOLAR);
     EXPECT_EQ(sut_->get_state(), farm::LoadState::RUNNING);
 }
@@ -326,4 +318,42 @@ TEST_F(PumpStateMachineTest, PreActivationOutputValidationDetectsStuckContactor)
 
     EXPECT_EQ(validate_sut.handle_load_on(cmd), ESP_ERR_INVALID_STATE);
     EXPECT_EQ(validate_sut.get_state(), farm::LoadState::ERROR_CONTACTOR_STUCK);
+}
+
+TEST_F(PumpStateMachineTest, OutputValidationDetectsSpontaneousStuckContactorInIdle)
+{
+    PumpStateMachineConfig valid_config{.enable_output_validation = true};
+    PumpStateMachine validate_sut(contactor_, monitor_, valid_config);
+
+    EXPECT_CALL(monitor_, has_any_output_energy()).WillOnce(Return(true));
+    EXPECT_CALL(contactor_, deactivate()).WillOnce(Return(ESP_OK));
+
+    validate_sut.tick(100);
+    EXPECT_EQ(validate_sut.get_state(), farm::LoadState::ERROR_CONTACTOR_STUCK);
+}
+
+TEST_F(PumpStateMachineTest, OutputValidationIgnoresDuringStabilizationThenDetectsLossOfPower)
+{
+    PumpStateMachineConfig valid_config{.enable_output_validation = true};
+    PumpStateMachine validate_sut(contactor_, monitor_, valid_config);
+
+    EXPECT_CALL(monitor_, has_any_output_energy()).WillRepeatedly(Return(false));
+    EXPECT_CALL(contactor_, activate(_)).WillOnce(Return(ESP_OK));
+
+    farm::LoadOnCommand cmd{
+        .circuit_id = 0,
+        .power_source = farm::PowerSource::SOLAR,
+        .watchdog_timeout_s = 60};
+
+    EXPECT_EQ(validate_sut.handle_load_on(cmd), ESP_OK);
+    EXPECT_EQ(validate_sut.get_state(), farm::LoadState::RUNNING);
+
+    // During first 500ms stabilization delay, absence of voltage is ignored
+    validate_sut.tick(300);
+    EXPECT_EQ(validate_sut.get_state(), farm::LoadState::RUNNING);
+
+    // After stabilization (>500ms total), loss of output voltage triggers ERROR_NO_SOURCE
+    EXPECT_CALL(contactor_, deactivate()).WillOnce(Return(ESP_OK));
+    validate_sut.tick(300); // 600ms total
+    EXPECT_EQ(validate_sut.get_state(), farm::LoadState::ERROR_NO_SOURCE);
 }

@@ -89,7 +89,7 @@ static ContactorConfig contactor_config{
     .grid_gpio = PIN_CONTACTOR_GRID,
     .solar_gpio = PIN_CONTACTOR_SOLAR,
     .active_level = 1, // 1 for MOC/TRIAC (Active-High), 0 for Relay
-    .demagnetization_delay_ms = 150};
+    .demagnetization_delay_ms = 500};
 static ContactorController contactor_ctrl{hal_gpio, hal_freertos, contactor_config};
 
 static NullOutputMonitor output_monitor;
@@ -105,7 +105,6 @@ static TankStripDisplay tank_display{hal_led_strip, hal_freertos, strip_cfg};
 // State Machine
 static PumpStateMachineConfig fsm_config{
     .default_watchdog_s = 3600,
-    .demagnetization_delay_ms = 150,
     .enable_output_validation = false,
     .nominal_power_w = 320};
 static PumpStateMachine state_machine{contactor_ctrl, output_monitor, fsm_config};

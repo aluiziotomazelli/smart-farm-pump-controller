@@ -76,6 +76,7 @@ private:
     uint32_t runtime_s_{0};
     uint32_t runtime_ms_accum_{0};
     uint32_t remaining_watchdog_ms_{0};
+    uint32_t stabilization_delay_ms_{0};
     bool state_changed_{false};
 
     void transition_to(farm::LoadState new_state, farm::PowerSource source = farm::PowerSource::UNKNOWN);

@@ -21,16 +21,6 @@ public:
         return ESP_OK;
     }
 
-    bool has_contactor1_energy() const override
-    {
-        return false;
-    }
-
-    bool has_contactor2_energy() const override
-    {
-        return false;
-    }
-
     bool has_any_output_energy() const override
     {
         return false;
