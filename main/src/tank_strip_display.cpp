@@ -28,7 +28,7 @@ static constexpr uint8_t VAL_FULL = 255;
 static constexpr uint8_t VAL_CYAN = 200;
 static constexpr uint8_t VAL_BACKUP = 220;
 
-static constexpr uint16_t IDLE_BREATHE_DURATION_MS = 1800;
+static constexpr uint16_t IDLE_BREATHE_DURATION_MS = 1200;
 
 TankStripDisplay::TankStripDisplay(
     IHalLedStrip& hal_strip,
@@ -369,7 +369,7 @@ void TankStripDisplay::render_auto_pattern()
 {
     uint32_t active_leds = 0;
     if (backup_mode_active_) {
-        active_leds = float_switch_is_full_ ? config_.num_leds : (config_.num_leds > 0 ? 1 : 0);
+        active_leds = float_switch_is_full_ ? config_.num_leds : (config_.num_leds >= 3 ? 3 : (config_.num_leds > 0 ? 1 : 0));
     }
     else {
         active_leds = calculate_active_leds(level_permille_);
@@ -377,7 +377,7 @@ void TankStripDisplay::render_auto_pattern()
 
     switch (state_) {
     case farm::LoadState::RUNNING:
-        if (mode_ == farm::ControlMode::STOP_OVERRIDE || mode_ == farm::ControlMode::FULL_MANUAL) {
+        if (mode_ == farm::ControlMode::MANUAL_RUN || mode_ == farm::ControlMode::FULL_MANUAL) {
             render_filling_manual(active_leds, source_);
         }
         else {
@@ -415,7 +415,9 @@ void TankStripDisplay::render_idle(uint32_t active_leds, farm::ControlMode mode,
     uint8_t val_fill = static_cast<uint8_t>(base_val * factor);
     uint8_t val_full = static_cast<uint8_t>(VAL_FULL * factor);
 
-    if (mode == farm::ControlMode::SOURCE_LOCKED) {
+    bool is_locked = (source == farm::PowerSource::SOLAR || source == farm::PowerSource::GRID);
+
+    if (is_locked) {
         uint16_t locked_hue = (source == farm::PowerSource::GRID) ? HUE_GRID : HUE_SOLAR;
 
         if (active_leds == 0) {
@@ -459,17 +461,9 @@ void TankStripDisplay::render_filling_auto(uint32_t active_leds, farm::PowerSour
     uint8_t fill_sat = backup_mode_active_ ? SAT_BACKUP : SAT_CYAN;
     uint8_t base_val = backup_mode_active_ ? VAL_BACKUP : VAL_CYAN;
 
-    // Render active level base
-    if (mode_ == farm::ControlMode::SOURCE_LOCKED && active_leds > 0) {
-        for (uint32_t i = 0; i + 1 < active_leds; i++) {
-            render_pixel_hsv(i, fill_hue, fill_sat, base_val);
-        }
-        render_pixel_hsv(active_leds - 1, source_hue, SAT_FULL, VAL_FULL);
-    }
-    else {
-        for (uint32_t i = 0; i < active_leds; i++) {
-            render_pixel_hsv(i, fill_hue, fill_sat, base_val);
-        }
+    // Render active level base in fill color (Cyan / Amber)
+    for (uint32_t i = 0; i < active_leds; i++) {
+        render_pixel_hsv(i, fill_hue, fill_sat, base_val);
     }
 
     // Render upward chase in source color
@@ -528,14 +522,20 @@ void TankStripDisplay::render_filling_manual(uint32_t active_leds, farm::PowerSo
 void TankStripDisplay::render_timeout(uint32_t active_leds)
 {
     bool is_on = (error_timer_ms_ % 1000) < 500;
-    uint32_t top_idx = (active_leds > 0) ? (active_leds - 1) : 0;
     uint16_t fill_hue = backup_mode_active_ ? HUE_BACKUP : HUE_FILL;
     uint8_t fill_sat = backup_mode_active_ ? SAT_BACKUP : SAT_CYAN;
     uint8_t base_val = backup_mode_active_ ? VAL_BACKUP : VAL_CYAN;
 
     for (uint32_t i = 0; i < active_leds; i++) {
-        if (is_on && i == top_idx) {
-            render_pixel_hsv(i, HUE_TIMEOUT, SAT_FULL, VAL_FULL);
+        // Blink the top 2 LEDs of the current water level
+        bool is_top_two = (i + 2 >= active_leds);
+        if (is_top_two) {
+            if (is_on) {
+                render_pixel_hsv(i, HUE_TIMEOUT, SAT_FULL, VAL_FULL);
+            }
+            else {
+                render_pixel_hsv(i, 0, 0, 0);
+            }
         }
         else {
             render_pixel_hsv(i, fill_hue, fill_sat, base_val);

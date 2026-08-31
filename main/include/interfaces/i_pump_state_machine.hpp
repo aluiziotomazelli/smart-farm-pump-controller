@@ -20,16 +20,18 @@ public:
     virtual esp_err_t init() = 0;
 
     /**
-     * @brief Processes a remote LOAD_ON command (valid in AUTO and SOURCE_LOCKED modes).
-     * @param cmd Load activation command parameters.
-     * @return ESP_OK if accepted, ESP_ERR_INVALID_STATE if in STOP_OVERRIDE/FULL_MANUAL or invalid source.
+     * @brief Processes a remote LOAD_ON command (valid in AUTO mode).
+     *
+     * @param cmd Command payload containing target power source and timeout.
+     * @return ESP_OK if accepted, ESP_ERR_INVALID_STATE if in MANUAL_RUN/FULL_MANUAL or invalid source.
      */
     virtual esp_err_t handle_load_on(const farm::LoadOnCommand& cmd) = 0;
 
     /**
-     * @brief Processes a remote LOAD_OFF command (valid in AUTO, SOURCE_LOCKED, and STOP_OVERRIDE modes).
-     * @param cmd Load deactivation command parameters.
-     * @return ESP_OK on success, ESP_ERR_INVALID_STATE in FULL_MANUAL.
+     * @brief Processes a remote LOAD_OFF command (valid in AUTO and MANUAL_RUN modes).
+     *
+     * @param cmd Command payload.
+     * @return ESP_OK if deactivated, ESP_ERR_INVALID_STATE if in FULL_MANUAL mode.
      */
     virtual esp_err_t handle_load_off(const farm::LoadOffCommand& cmd) = 0;
 

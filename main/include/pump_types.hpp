@@ -14,7 +14,19 @@ struct ContactorConfig
     gpio_num_t grid_gpio{GPIO_NUM_5};       ///< D3 on Xiao C3 (Grid Contactor Gate)
     gpio_num_t solar_gpio{GPIO_NUM_6};      ///< D4 on Xiao C3 (Solar Contactor Gate)
     uint8_t active_level{1};                ///< 1 for active-high (MOC/TRIAC), 0 for active-low (Relay)
-    uint32_t demagnetization_delay_ms{150}; ///< Safety delay between switching sources
+    uint32_t demagnetization_delay_ms{500}; ///< Safety delay between switching sources (500ms)
+};
+
+/**
+ * @struct OutputMonitorConfig
+ * @brief Configuration parameters for AC output voltage monitor sensor.
+ */
+struct OutputMonitorConfig
+{
+    gpio_num_t gpio_pin{GPIO_NUM_10}; ///< D10 on Xiao C3 (AC Output Voltage Detector)
+    uint8_t active_level{1};          ///< 1 if High indicates voltage presence, 0 if Low indicates voltage presence
+    bool pull_down_en{true};          ///< Enable internal pull-down if sensor output is active-high open/floating
+    bool pull_up_en{false};           ///< Enable internal pull-up if sensor output is open-collector / active-low
 };
 
 /**
@@ -25,7 +37,8 @@ struct PumpStateSnapshot
 {
     farm::LoadState state{farm::LoadState::IDLE};
     farm::ControlMode mode{farm::ControlMode::AUTO};
-    farm::PowerSource source{farm::PowerSource::UNKNOWN};
+    farm::PowerSource selected_source{farm::PowerSource::AUTO};
+    farm::PowerSource active_source{farm::PowerSource::UNKNOWN};
     uint16_t power_w{0};
     uint32_t runtime_s{0};
     uint32_t remaining_watchdog_s{0};
@@ -39,7 +52,6 @@ struct PumpStateSnapshot
 struct PumpStateMachineConfig
 {
     uint32_t default_watchdog_s{3600};     ///< Default watchdog timeout if 0 is passed
-    uint32_t demagnetization_delay_ms{150}; ///< Delay between de-energizing one and energizing another
     bool enable_output_validation{false};   ///< If true, queries IOutputMonitor before/after actuation
     uint16_t nominal_power_w{320};          ///< Nominal power consumption in Watts when active
 };

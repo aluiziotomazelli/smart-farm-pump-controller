@@ -36,7 +36,7 @@ esp_err_t ContactorController::init()
     uint64_t pin_mask = (1ULL << config_.grid_gpio) | (1ULL << config_.solar_gpio);
     gpio_config_t io_conf = {
         .pin_bit_mask = pin_mask,
-        .mode = GPIO_MODE_OUTPUT,
+        .mode = GPIO_MODE_INPUT_OUTPUT,
         .pull_up_en = (config_.active_level == 0) ? GPIO_PULLUP_ENABLE : GPIO_PULLUP_DISABLE,
         .pull_down_en = (config_.active_level == 1) ? GPIO_PULLDOWN_ENABLE : GPIO_PULLDOWN_DISABLE,
         .intr_type = GPIO_INTR_DISABLE,

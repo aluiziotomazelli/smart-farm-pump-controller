@@ -92,7 +92,8 @@ protected:
         PumpStateSnapshot default_snapshot{
             .state = farm::LoadState::IDLE,
             .mode = farm::ControlMode::AUTO,
-            .source = farm::PowerSource::UNKNOWN,
+            .selected_source = farm::PowerSource::AUTO,
+            .active_source = farm::PowerSource::UNKNOWN,
             .power_w = 0,
             .runtime_s = 0,
             .remaining_watchdog_s = 0,
@@ -194,7 +195,7 @@ TEST_F(PumpControllerTest, InitTimeManagerFailureMarksSessionUnhealthy)
 
 TEST_F(PumpControllerTest, StartLaunchesTask)
 {
-    EXPECT_CALL(hal_rtos_, task_create(_, ::testing::StrEq("pump_ctrl_task"), 4096, _, 5, _))
+    EXPECT_CALL(hal_rtos_, task_create(_, ::testing::StrEq("pump_ctrl_task"), 8192, _, 5, _))
         .WillOnce(Return(pdPASS));
 
     EXPECT_EQ(sut_->start(), ESP_OK);
@@ -214,7 +215,8 @@ TEST_F(PumpControllerTest, TickSamplesCenterSwitchAutoModeAndSendsFillRequestOnB
     PumpStateSnapshot idle_snapshot{
         .state = farm::LoadState::IDLE,
         .mode = farm::ControlMode::AUTO,
-        .source = farm::PowerSource::UNKNOWN,
+        .selected_source = farm::PowerSource::AUTO,
+        .active_source = farm::PowerSource::UNKNOWN,
         .power_w = 0,
         .runtime_s = 0,
         .remaining_watchdog_s = 0,
@@ -226,7 +228,7 @@ TEST_F(PumpControllerTest, TickSamplesCenterSwitchAutoModeAndSendsFillRequestOnB
 
     EXPECT_CALL(state_machine_, tick(50)).Times(1);
     EXPECT_CALL(status_reporter_, tick(50)).Times(1);
-    EXPECT_CALL(display_, update_state(farm::LoadState::IDLE, farm::ControlMode::AUTO, farm::PowerSource::UNKNOWN)).Times(1);
+    EXPECT_CALL(display_, update_state(farm::LoadState::IDLE, farm::ControlMode::AUTO, farm::PowerSource::AUTO)).Times(1);
 
     sut_->tick(50);
 }
@@ -242,8 +244,9 @@ TEST_F(PumpControllerTest, TickSamplesSolarSwitchAndHandlesOperatorStartWhenOff)
     EXPECT_CALL(button_action_, get_last_click()).WillOnce(Return(ui_inputs::ButtonClickType::CLICK));
     PumpStateSnapshot idle_snapshot{
         .state = farm::LoadState::IDLE,
-        .mode = farm::ControlMode::SOURCE_LOCKED,
-        .source = farm::PowerSource::SOLAR,
+        .mode = farm::ControlMode::AUTO,
+        .selected_source = farm::PowerSource::SOLAR,
+        .active_source = farm::PowerSource::UNKNOWN,
         .power_w = 0,
         .runtime_s = 0,
         .remaining_watchdog_s = 0,
@@ -277,8 +280,9 @@ TEST_F(PumpControllerTest, TickHandlesOperatorStopWhenPumpIsRunning)
     EXPECT_CALL(button_action_, get_last_click()).WillOnce(Return(ui_inputs::ButtonClickType::CLICK));
     PumpStateSnapshot running_snapshot{
         .state = farm::LoadState::RUNNING,
-        .mode = farm::ControlMode::STOP_OVERRIDE,
-        .source = farm::PowerSource::SOLAR,
+        .mode = farm::ControlMode::MANUAL_RUN,
+        .selected_source = farm::PowerSource::SOLAR,
+        .active_source = farm::PowerSource::SOLAR,
         .power_w = 320,
         .runtime_s = 15,
         .remaining_watchdog_s = 0,
@@ -311,6 +315,7 @@ TEST_F(PumpControllerTest, TickHandlesOtaCommandStopsPumpConnectsWiFiAndRestarts
     EXPECT_CALL(btn_trigger_, disarm()).Times(::testing::AtLeast(1));
     EXPECT_CALL(state_machine_, handle_operator_stop()).Times(1);
     EXPECT_CALL(display_, set_override_pattern(TankStripPattern::OTA_UPDATING)).Times(1);
+    EXPECT_CALL(espnow_, deinit()).Times(1);
     EXPECT_CALL(mock_wifi_, connect(15000, 3, 1500)).WillOnce(Return(ESP_OK));
 
     OtaActionResult download_ok{.success = true, .exec_result = farm::OtaExecResult::CONFIRMED_SUCCESS, .error_code = farm::OtaErrorCode::NONE};
@@ -333,6 +338,7 @@ TEST_F(PumpControllerTest, ButtonOtaTriggerInvokesOtaFlowOnTick)
     EXPECT_CALL(btn_trigger_, disarm()).Times(::testing::AtLeast(1));
     EXPECT_CALL(state_machine_, handle_operator_stop()).Times(1);
     EXPECT_CALL(display_, set_override_pattern(TankStripPattern::OTA_UPDATING)).Times(1);
+    EXPECT_CALL(espnow_, deinit()).Times(1);
     EXPECT_CALL(mock_wifi_, connect(15000, 3, 1500)).WillOnce(Return(ESP_OK));
 
     OtaActionResult download_ok{.success = true, .exec_result = farm::OtaExecResult::CONFIRMED_SUCCESS, .error_code = farm::OtaErrorCode::NONE};
@@ -355,9 +361,10 @@ TEST_F(PumpControllerTest, TickHandlesOtaCommandWiFiFailureSendsReportAndRearmsT
     EXPECT_CALL(btn_trigger_, disarm()).Times(::testing::AtLeast(1));
     EXPECT_CALL(state_machine_, handle_operator_stop()).Times(1);
     EXPECT_CALL(display_, set_override_pattern(TankStripPattern::OTA_UPDATING)).Times(1);
-    EXPECT_CALL(espnow_, set_channel_policy(espnow::ChannelPolicy::FIXED)).Times(1);
+    EXPECT_CALL(espnow_, deinit()).Times(1);
     EXPECT_CALL(mock_wifi_, connect(15000, 3, 1500)).WillOnce(Return(ESP_FAIL));
     EXPECT_CALL(mock_wifi_, disconnect(2000)).WillOnce(Return(ESP_OK));
+    EXPECT_CALL(espnow_, init(_)).WillOnce(Return(ESP_OK));
     EXPECT_CALL(espnow_, set_channel_policy(espnow::ChannelPolicy::SCAN)).Times(1);
 
     EXPECT_CALL(espnow_, send_data(espnow::ReservedIds::HUB, static_cast<uint8_t>(farm::PayloadType::OTA_STATUS_REPORT), _, _, true))
@@ -376,13 +383,14 @@ TEST_F(PumpControllerTest, TickHandlesOtaCommandDownloadFailureSendsReportAndRes
     EXPECT_CALL(btn_trigger_, disarm()).Times(::testing::AtLeast(1));
     EXPECT_CALL(state_machine_, handle_operator_stop()).Times(1);
     EXPECT_CALL(display_, set_override_pattern(TankStripPattern::OTA_UPDATING)).Times(1);
-    EXPECT_CALL(espnow_, set_channel_policy(espnow::ChannelPolicy::FIXED)).Times(1);
+    EXPECT_CALL(espnow_, deinit()).Times(1);
     EXPECT_CALL(mock_wifi_, connect(15000, 3, 1500)).WillOnce(Return(ESP_OK));
 
     OtaActionResult download_fail{.success = false, .exec_result = farm::OtaExecResult::DOWNLOAD_FAILED, .error_code = farm::OtaErrorCode::HTTP_DOWNLOAD_FAILED};
     EXPECT_CALL(mock_ota_, execute_download(60000)).WillOnce(Return(download_fail));
 
     EXPECT_CALL(mock_wifi_, disconnect(2000)).WillOnce(Return(ESP_OK));
+    EXPECT_CALL(espnow_, init(_)).WillOnce(Return(ESP_OK));
     EXPECT_CALL(espnow_, set_channel_policy(espnow::ChannelPolicy::SCAN)).Times(1);
     EXPECT_CALL(espnow_, send_data(espnow::ReservedIds::HUB, static_cast<uint8_t>(farm::PayloadType::OTA_STATUS_REPORT), _, _, true))
         .WillOnce(Return(ESP_OK));
@@ -397,7 +405,8 @@ TEST_F(PumpControllerTest, TickRuntimeAccountingIncrementsHourmeter)
     PumpStateSnapshot running_snapshot{
         .state = farm::LoadState::RUNNING,
         .mode = farm::ControlMode::AUTO,
-        .source = farm::PowerSource::SOLAR,
+        .selected_source = farm::PowerSource::AUTO,
+        .active_source = farm::PowerSource::SOLAR,
         .power_w = 320,
         .runtime_s = 10,
         .remaining_watchdog_s = 3590,
@@ -413,22 +422,26 @@ TEST_F(PumpControllerTest, TickRuntimeAccountingIncrementsHourmeter)
     EXPECT_EQ(sut_->get_stats().grid_runtime_s, 0);
 }
 
-static time_t make_test_time(int hour)
+static time_t make_test_time(int hour, int min = 0)
 {
+    // SunSchedule has DEFAULT_TZ_OFFSET_HOURS = -3.0.
+    // decompose(epoch) computes: local_unix = epoch + (-3h).
+    // So to simulate local time (e.g. 12:00 BRT), UTC epoch is (12 - (-3)) = 15:00 UTC.
     struct tm t{};
     t.tm_year = 2026 - 1900;
-    t.tm_mon = 5;
+    t.tm_mon = 5; // June (Winter in South hemisphere: sunrise ~06:45, sunset ~17:15)
     t.tm_mday = 15;
-    t.tm_hour = hour;
-    t.tm_min = 30;
+    t.tm_hour = hour + 3; // Convert local hour to UTC
+    t.tm_min = min;
     t.tm_sec = 0;
-    return mktime(&t);
+    return timegm(&t);
 }
 
 TEST_F(PumpControllerTest, TickUpdatesDisplayBrightnessToDayWhenSynchronized)
 {
     EXPECT_CALL(time_manager_, is_synchronized()).WillRepeatedly(Return(true));
-    EXPECT_CALL(time_manager_, get_timestamp_sec()).WillRepeatedly(Return(make_test_time(12))); // 12:30 (Day)
+    // 12:00 (Solar Noon -> Peak elevation 1.0 -> Peak brightness 80)
+    EXPECT_CALL(time_manager_, get_timestamp_sec()).WillRepeatedly(Return(make_test_time(12, 0)));
 
     EXPECT_CALL(display_, set_brightness(80)).Times(1);
     sut_->tick(10000); // 10s check interval
@@ -437,18 +450,30 @@ TEST_F(PumpControllerTest, TickUpdatesDisplayBrightnessToDayWhenSynchronized)
 TEST_F(PumpControllerTest, TickUpdatesDisplayBrightnessToTwilightWhenSynchronized)
 {
     EXPECT_CALL(time_manager_, is_synchronized()).WillRepeatedly(Return(true));
-    EXPECT_CALL(time_manager_, get_timestamp_sec()).WillRepeatedly(Return(make_test_time(19))); // 19:30 (Twilight)
+    // 17:25 (Sunset is ~17:15, 17:25 is within 30-min twilight window -> 10)
+    EXPECT_CALL(time_manager_, get_timestamp_sec()).WillRepeatedly(Return(make_test_time(17, 25)));
 
     EXPECT_CALL(display_, set_brightness(10)).Times(1);
     sut_->tick(10000);
 }
 
-TEST_F(PumpControllerTest, TickUpdatesDisplayBrightnessToNightWhenSynchronized)
+TEST_F(PumpControllerTest, TickUpdatesDisplayBrightnessToEveningNightWhenSynchronized)
 {
     EXPECT_CALL(time_manager_, is_synchronized()).WillRepeatedly(Return(true));
-    EXPECT_CALL(time_manager_, get_timestamp_sec()).WillRepeatedly(Return(make_test_time(23))); // 23:30 (Night)
+    // 20:00 (Evening Night -> Night brightness 5)
+    EXPECT_CALL(time_manager_, get_timestamp_sec()).WillRepeatedly(Return(make_test_time(20, 0)));
 
     EXPECT_CALL(display_, set_brightness(5)).Times(1);
+    sut_->tick(10000);
+}
+
+TEST_F(PumpControllerTest, TickUpdatesDisplayBrightnessToMidnightBlackoutWhenSynchronized)
+{
+    EXPECT_CALL(time_manager_, is_synchronized()).WillRepeatedly(Return(true));
+    // 23:30 (Midnight -> 0)
+    EXPECT_CALL(time_manager_, get_timestamp_sec()).WillRepeatedly(Return(make_test_time(23, 30)));
+
+    EXPECT_CALL(display_, set_brightness(0)).Times(1);
     sut_->tick(10000);
 }
 

@@ -62,6 +62,7 @@ PumpController::PumpController(
     , hal_rtos_(hal_rtos)
     , hal_system_(hal_system)
 {
+    sun_schedule_.set_location(LOCATION_LATITUDE_DEG, LOCATION_TZ_OFFSET_HOURS);
 }
 
 PumpController::~PumpController()
@@ -196,7 +197,9 @@ esp_err_t PumpController::init()
 esp_err_t PumpController::start()
 {
     is_running_ = true;
-    BaseType_t res = hal_rtos_.task_create(task_entry, "pump_ctrl_task", 4096, this, 5, &task_handle_);
+    static constexpr uint32_t PUMP_CTRL_TASK_STACK_SIZE = 8192;
+    BaseType_t res =
+        hal_rtos_.task_create(task_entry, "pump_ctrl_task", PUMP_CTRL_TASK_STACK_SIZE, this, 5, &task_handle_);
 
     if (res != pdPASS) {
         ESP_LOGE(TAG, "Failed to create PumpController task");
@@ -279,6 +282,7 @@ void PumpController::tick(uint32_t delta_ms)
 
     // 3. Process Inbound Remote Commands
     PumpCommandProcessResult cmd_res = command_handler_.process();
+    // TODO: make a helper function to handle command result
     if (cmd_res.time_synced) {
         core_.has_valid_time = time_manager_.is_synchronized();
         core_.last_sync_unix_time_ms = time_manager_.get_timestamp_ms();
@@ -306,7 +310,9 @@ void PumpController::tick(uint32_t delta_ms)
 
     // 5. Update Visual Feedback on Addressable Strip & Runtime Accounting
     auto snapshot = state_machine_.get_snapshot();
-    display_.update_state(snapshot.state, snapshot.mode, snapshot.source);
+    farm::PowerSource display_source =
+        (snapshot.state == farm::LoadState::RUNNING) ? snapshot.active_source : snapshot.selected_source;
+    display_.update_state(snapshot.state, snapshot.mode, display_source);
     update_display_brightness(delta_ms);
 
     if (snapshot.state == farm::LoadState::RUNNING) {
@@ -314,7 +320,7 @@ void PumpController::tick(uint32_t delta_ms)
         while (runtime_accumulator_ms_ >= 1000) {
             runtime_accumulator_ms_ -= 1000;
             stats_.total_runtime_s++;
-            if (snapshot.source == farm::PowerSource::SOLAR) {
+            if (snapshot.active_source == farm::PowerSource::SOLAR) {
                 stats_.solar_runtime_s++;
             }
             else {
@@ -424,7 +430,7 @@ esp_err_t PumpController::init_ota()
     ota_cfg.transport.manifest_timeout_ms = 10000;
     ota_cfg.transport.firmware_timeout_ms = 30000;
     ota_cfg.security.allow_http_during_development = true;
-    ota_cfg.allow_same_version = true;
+    ota_cfg.allow_same_version = true; // TODO: change to false in production
     ota_cfg.restart_on_success = false;
 
     if (!ota_controller_.init(ota_cfg)) {
@@ -440,6 +446,7 @@ esp_err_t PumpController::init_espnow()
     config.node_id = static_cast<espnow::NodeId>(farm::NodeId::PUMP_CONTROL);
     config.node_type = static_cast<espnow::NodeType>(farm::NodeType::ACTUATOR);
     config.app_rx_queue = rx_queue_;
+    config.ack_timeout_ms = 500;
     config.wifi_channel = 1;
     config.heartbeat_interval_ms = 3 * 60 * 1000; // 3 minutes
     config.enable_heartbeat = true;
@@ -504,43 +511,63 @@ void PumpController::process_pending_ota()
     // 2. Visual feedback on addressable strip
     display_.set_override_pattern(TankStripPattern::OTA_UPDATING);
 
-    // 3. Connect to WiFi with sync retries
-    ESP_LOGI(TAG, "Connecting to WiFi for OTA download (timeout: 15000 ms, max_retries: 3)...");
-    espnow_.set_channel_policy(espnow::ChannelPolicy::FIXED);
-    espnow_.set_enable_heartbeat(false);
-    esp_err_t wifi_err = wifi_manager_.connect(15000, 3, 1500);
-    if (wifi_err != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to connect to WiFi for OTA (%s)", esp_err_to_name(wifi_err));
-        wifi_manager_.disconnect(2000);
-        espnow_.set_channel_policy(espnow::ChannelPolicy::SCAN);
-        espnow_.set_enable_heartbeat(true);
-        send_ota_report(farm::OtaExecResult::DOWNLOAD_FAILED, farm::OtaErrorCode::WIFI_CONNECT_FAILED);
-        display_.set_override_pattern(TankStripPattern::AUTO);
-        btn_trigger_.arm(*this);
-        return;
+    // 3. Deinitialize ESP-NOW to free heap and eliminate RF contention during download
+    espnow_.deinit();
+
+    bool previous_connected = (wifi_manager_.get_state() == wifi_manager::State::CONNECTED_GOT_IP);
+    bool wifi_ok = previous_connected;
+
+    // 4. Connect to WiFi with sync retries if not already connected
+    if (!previous_connected) {
+        ESP_LOGI(TAG, "Connecting to WiFi for OTA download (timeout: 15000 ms, max_retries: 3)...");
+        wifi_ok = (wifi_manager_.connect(15000, 3, 1500) == ESP_OK);
     }
 
-    // 4. Execute OTA download
-    OtaActionResult result = ota_controller_.execute_download();
-    if (result.success) {
-        ESP_LOGI(TAG, "OTA download succeeded! Persisting state and restarting...");
-        pending_core_commit_ = true;
-        pending_controller_commit_ = true;
-        save_persistent_state(true);
-        wifi_manager_.disconnect(2000);
-        wifi_manager_.stop(2000);
-        hal_system_.restart();
-        return;
+    UBaseType_t stack_free_bytes = hal_rtos_.task_get_stack_high_water_mark(nullptr);
+    ESP_LOGI(
+        TAG, "Stack High Water Mark before OTA download: %u bytes remaining", static_cast<unsigned>(stack_free_bytes));
+
+    OtaActionResult result = {};
+
+    if (wifi_ok) {
+        result = ota_controller_.execute_download();
+        stack_free_bytes = hal_rtos_.task_get_stack_high_water_mark(nullptr);
+        ESP_LOGI(
+            TAG,
+            "Stack High Water Mark after OTA download: %u bytes remaining",
+            static_cast<unsigned>(stack_free_bytes));
+
+        if (result.success) {
+            ESP_LOGI(TAG, "OTA download succeeded! Persisting state and restarting...");
+            pending_core_commit_ = true;
+            pending_controller_commit_ = true;
+            save_persistent_state(true);
+            wifi_manager_.disconnect(2000);
+            wifi_manager_.stop(2000);
+            hal_system_.restart();
+            return;
+        }
+        ESP_LOGE(TAG, "OTA download failed (error_code: %d)", static_cast<int>(result.error_code));
     }
     else {
-        ESP_LOGE(TAG, "OTA download failed (error_code: %d)", static_cast<int>(result.error_code));
-        wifi_manager_.disconnect(2000);
-        espnow_.set_channel_policy(espnow::ChannelPolicy::SCAN);
-        espnow_.set_enable_heartbeat(true);
-        send_ota_report(result.exec_result, result.error_code);
-        display_.set_override_pattern(TankStripPattern::AUTO);
-        btn_trigger_.arm(*this);
+        ESP_LOGE(TAG, "Failed to connect to WiFi for OTA");
+        result.success = false;
+        result.exec_result = farm::OtaExecResult::DOWNLOAD_FAILED;
+        result.error_code = farm::OtaErrorCode::WIFI_CONNECT_FAILED;
     }
+
+    // Restore components if update did not result in reboot
+    if (!previous_connected) {
+        wifi_manager_.disconnect(2000);
+    }
+
+    if (init_espnow() == ESP_OK) {
+        espnow_.set_channel_policy(previous_connected ? espnow::ChannelPolicy::FIXED : espnow::ChannelPolicy::SCAN);
+        send_ota_report(result.exec_result, result.error_code);
+    }
+
+    display_.set_override_pattern(TankStripPattern::AUTO);
+    btn_trigger_.arm(*this);
 }
 
 esp_err_t PumpController::send_ota_report(farm::OtaExecResult result, farm::OtaErrorCode error_code)
@@ -593,20 +620,39 @@ void PumpController::update_display_brightness(uint32_t delta_ms)
     }
     brightness_check_accumulator_ms_ = 0;
 
-    static constexpr uint8_t BRIGHTNESS_DAY = 80;      // 06:00 to 18:00
-    static constexpr uint8_t BRIGHTNESS_TWILIGHT = 10; // 18:00 to 22:00
-    static constexpr uint8_t BRIGHTNESS_NIGHT = 5;     // 22:00 to 06:00
+    static constexpr uint8_t BRIGHTNESS_MAX_DAY  = 80; // Solar noon peak
+    static constexpr uint8_t BRIGHTNESS_TWILIGHT = 10; // Dawn / Dusk / Daytime baseline
+    static constexpr uint8_t BRIGHTNESS_NIGHT    = 5;  // Early night before midnight
+    static constexpr uint8_t BRIGHTNESS_MIDNIGHT = 0;  // 22:00 to dawn (total blackout)
 
     time_t now = time_manager_.get_timestamp_sec();
-    struct tm timeinfo;
-    localtime_r(&now, &timeinfo);
+    
+    // Decompose local time according to SunSchedule's configured timezone
+    int64_t offset_sec = static_cast<int64_t>(sun_schedule_.get_tz_offset_hours() * 3600.0f);
+    time_t local_unix = now + offset_sec;
+    struct tm local_tm{};
+    gmtime_r(&local_unix, &local_tm);
 
     uint8_t target_brightness = BRIGHTNESS_NIGHT;
-    if (timeinfo.tm_hour >= 6 && timeinfo.tm_hour < 18) {
-        target_brightness = BRIGHTNESS_DAY;
+
+    if (sun_schedule_.is_daytime(now)) {
+        // 1. DAY: Sinusoidal interpolation from TWILIGHT (10) to MAX_DAY (80)
+        float elevation = sun_schedule_.get_sun_elevation_factor(now);
+        target_brightness = static_cast<uint8_t>(
+            BRIGHTNESS_TWILIGHT + elevation * (BRIGHTNESS_MAX_DAY - BRIGHTNESS_TWILIGHT)
+        );
     }
-    else if (timeinfo.tm_hour >= 18 && timeinfo.tm_hour < 22) {
+    else if (sun_schedule_.is_twilight(now, 30)) {
+        // 2. TWILIGHT: 30-min window before sunrise or after sunset
         target_brightness = BRIGHTNESS_TWILIGHT;
+    }
+    else if (local_tm.tm_hour >= 22 || local_tm.tm_hour < 5) {
+        // 3. MIDNIGHT: 22:00 to 05:00 blackout
+        target_brightness = BRIGHTNESS_MIDNIGHT;
+    }
+    else {
+        // 4. NIGHT: Evening between twilight and 22:00
+        target_brightness = BRIGHTNESS_NIGHT;
     }
 
     if (target_brightness != current_display_brightness_) {

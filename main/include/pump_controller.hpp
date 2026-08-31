@@ -21,6 +21,7 @@
 #include "interfaces/i_pump_command_handler.hpp"
 #include "pump_stats.hpp"
 #include "core_types.hpp"
+#include "sun_schedule.hpp"
 
 /**
  * @class PumpController
@@ -98,6 +99,8 @@ private:
     idf_hals::IHalFreertos& hal_rtos_;
     idf_hals::ISystemHAL& hal_system_;
 
+    SunSchedule sun_schedule_{};
+
     CoreData core_{};
     PumpStats stats_{};
     bool pending_core_commit_{false};
@@ -107,7 +110,7 @@ private:
     uint32_t runtime_accumulator_ms_{0};
     uint32_t nvs_commit_accumulator_ms_{0};
     uint32_t brightness_check_accumulator_ms_{0};
-    uint8_t current_display_brightness_{0};
+    uint8_t current_display_brightness_{0xFF};
 
     TaskHandle_t task_handle_{nullptr};
     bool is_running_{false};

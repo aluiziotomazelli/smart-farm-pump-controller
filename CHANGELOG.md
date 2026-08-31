@@ -5,6 +5,66 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.5] - 2026-08-31
+
+### Added
+- **Dynamic Solar-Elevation Display Brightness (`PumpController`)**:
+  - Integrated astronomical calculation via [`SunSchedule`](file:///home/german/dev/workspaces/smart-farm/smart-farm-pump-controller/components/smart-farm-common/include/sun_schedule.hpp) to continuously adapt LED strip brightness according to solar elevation:
+    - **Daytime:** Sinusoidal continuous interpolation from `BRIGHTNESS_TWILIGHT` (10) up to `BRIGHTNESS_MAX_DAY` (80) at solar noon.
+    - **Twilight:** Set to `BRIGHTNESS_TWILIGHT` (10) during dawn and dusk windows (30-min threshold).
+    - **Evening Night:** Soft nighttime illumination `BRIGHTNESS_NIGHT` (5) before 22:00.
+    - **Midnight Blackout:** Total display blackout `BRIGHTNESS_MIDNIGHT` (0) between 22:00 and 05:00/dawn.
+  - Added geographical location definitions (`LOCATION_LATITUDE_DEG`, `LOCATION_TZ_OFFSET_HOURS`) in `secrets.example.hpp` and automated injection in `PumpController` constructor to keep exact GPS coordinates private.
+
+## [0.3.4] - 2026-08-30
+
+### Added
+- **Production `OutputMonitor` Driver (`IOutputMonitor`)**:
+  - Implemented concrete driver [`OutputMonitor`](file:///home/german/dev/workspaces/smart-farm/smart-farm-pump-controller/main/include/output_monitor.hpp) utilizing `IGpioHAL` to perform non-blocking sampling of motor AC output terminal voltage.
+  - Added [`OutputMonitorConfig`](file:///home/german/dev/workspaces/smart-farm/smart-farm-pump-controller/main/include/pump_types.hpp) with configurable pin, active level, and pull-up/down modes (default `GPIO 10 / D10`, active-high with pull-down).
+  - Added dedicated host unit tests in `host_test/test_output_monitor`.
+- **On-Target Hardware-in-the-Loop (HIL) Test Suite (`test_apps/test_on_target`)**:
+  - Created standalone ESP-IDF + Unity test harness for Seeed Studio XIAO ESP32-C3 with loopback jumpers (`D6->D10`, `D7->D2`, `D8->D1`, `D9->D0`).
+  - Implemented 7 on-target test cases validating real silicon behavior:
+    - Output voltage sensor reading on physical GPIO.
+    - 3-position selector switch with hardware debounce.
+    - Contactor break-before-make interlock and demagnetization delay on actual output pins (`D3`, `D4`).
+    - Full `PumpStateMachine` output validation (contactor stuck and power loss detection).
+    - Manual start/stop via pushbutton and live hot-switching.
+    - Remote fill watchdog timeout safety protection.
+    - Visual LED strip pattern demonstration on `D5` (WS2812B).
+
+### Changed
+- **Contactor GPIO Pin Mode**:
+  - Configured contactor GPIOs as `GPIO_MODE_INPUT_OUTPUT` in `ContactorController::init()` allowing direct register readback of output level.
+- **Diffuser-Optimized LED Strip Display (`TankStripDisplay`)**:
+  - In backup mode (`!float_switch_is_full_`), lights up a base of 3 LEDs (LEDs 0, 1, 2) in Amber to provide optimal visibility through diffuser panels.
+  - In timeout alert (`render_timeout`), blinks the top two active LEDs in Amber while keeping lower level LEDs stable.
+
+## [0.3.3] - 2026-08-30
+
+### Added
+- **Continuous Output Validation with Stabilization Delay (`PumpStateMachine`)**:
+  - Implemented a 500 ms mechanical stabilization grace period upon contactor actuation before evaluating output voltage presence to prevent false-negative trips during relay/contactor pull-in.
+  - Added continuous output monitoring in `PumpStateMachine::tick()`:
+    - **`IDLE` state:** Immediately detects unexpected voltage across motor terminals (`has_any_output_energy() == true`) and transitions to `ERROR_CONTACTOR_STUCK` (protecting against welded/stuck contactor contacts).
+    - **`RUNNING` state (post-stabilization):** Detects loss of output voltage (`!has_any_output_energy()`), automatically deactivates coil drivers, and transitions safely to `ERROR_NO_SOURCE` (loss of grid/solar power or tripped breaker).
+- **Comprehensive Unit Tests**:
+  - Added test cases in `test_pump_state_machine` validating:
+    - Source lock changes in `AUTO` mode safely de-energizing the load.
+    - Immediate hot-switching in `MANUAL_RUN` mode.
+    - Spontaneous contactor stuck detection in `IDLE`.
+    - Voltage loss detection after the 500 ms stabilization window.
+
+### Changed
+- **AUTO Mode Source Lock Transition Safety**:
+  - Changing the physical source selector switch to a specific source (`SOLAR` or `GRID`) while running in `AUTO` mode now deactivates the active contactor safely and enters `IDLE` to notify the Hub for coordinated re-arbitration, preventing blind contactor chattering/energization into unpowered sources.
+- **Safety Interlock & Demagnetization Timing**:
+  - Increased `ContactorConfig::demagnetization_delay_ms` default to **500 ms** for robust arc-extinction, back-EMF discharge, and break-before-make source transfer.
+  - Eliminated duplicate `demagnetization_delay_ms` from `PumpStateMachineConfig` to establish `ContactorConfig` as the single source of truth.
+- **Simplified `IOutputMonitor` Interface**:
+  - Streamlined `IOutputMonitor` to `has_any_output_energy()` for direct, robust terminal voltage validation across all grounding topologies.
+
 ## [0.3.1] - 2026-08-27
 
 ### Added
