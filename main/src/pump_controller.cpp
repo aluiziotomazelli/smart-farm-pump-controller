@@ -62,6 +62,9 @@ PumpController::PumpController(
     , hal_rtos_(hal_rtos)
     , hal_system_(hal_system)
 {
+#if defined(LOCATION_LATITUDE_DEG) && defined(LOCATION_TZ_OFFSET_HOURS)
+    sun_schedule_.set_location(LOCATION_LATITUDE_DEG, LOCATION_TZ_OFFSET_HOURS);
+#endif
 }
 
 PumpController::~PumpController()
@@ -197,7 +200,8 @@ esp_err_t PumpController::start()
 {
     is_running_ = true;
     static constexpr uint32_t PUMP_CTRL_TASK_STACK_SIZE = 8192;
-    BaseType_t res = hal_rtos_.task_create(task_entry, "pump_ctrl_task", PUMP_CTRL_TASK_STACK_SIZE, this, 5, &task_handle_);
+    BaseType_t res =
+        hal_rtos_.task_create(task_entry, "pump_ctrl_task", PUMP_CTRL_TASK_STACK_SIZE, this, 5, &task_handle_);
 
     if (res != pdPASS) {
         ESP_LOGE(TAG, "Failed to create PumpController task");
@@ -522,14 +526,18 @@ void PumpController::process_pending_ota()
     }
 
     UBaseType_t stack_free_bytes = hal_rtos_.task_get_stack_high_water_mark(nullptr);
-    ESP_LOGI(TAG, "Stack High Water Mark before OTA download: %u bytes remaining", static_cast<unsigned>(stack_free_bytes));
+    ESP_LOGI(
+        TAG, "Stack High Water Mark before OTA download: %u bytes remaining", static_cast<unsigned>(stack_free_bytes));
 
     OtaActionResult result = {};
 
     if (wifi_ok) {
         result = ota_controller_.execute_download();
         stack_free_bytes = hal_rtos_.task_get_stack_high_water_mark(nullptr);
-        ESP_LOGI(TAG, "Stack High Water Mark after OTA download: %u bytes remaining", static_cast<unsigned>(stack_free_bytes));
+        ESP_LOGI(
+            TAG,
+            "Stack High Water Mark after OTA download: %u bytes remaining",
+            static_cast<unsigned>(stack_free_bytes));
 
         if (result.success) {
             ESP_LOGI(TAG, "OTA download succeeded! Persisting state and restarting...");
@@ -614,20 +622,39 @@ void PumpController::update_display_brightness(uint32_t delta_ms)
     }
     brightness_check_accumulator_ms_ = 0;
 
-    static constexpr uint8_t BRIGHTNESS_DAY = 80;      // 06:00 to 18:00
-    static constexpr uint8_t BRIGHTNESS_TWILIGHT = 10; // 18:00 to 22:00
-    static constexpr uint8_t BRIGHTNESS_NIGHT = 5;     // 22:00 to 06:00
+    static constexpr uint8_t BRIGHTNESS_MAX_DAY  = 80; // Solar noon peak
+    static constexpr uint8_t BRIGHTNESS_TWILIGHT = 10; // Dawn / Dusk / Daytime baseline
+    static constexpr uint8_t BRIGHTNESS_NIGHT    = 5;  // Early night before midnight
+    static constexpr uint8_t BRIGHTNESS_MIDNIGHT = 0;  // 22:00 to dawn (total blackout)
 
     time_t now = time_manager_.get_timestamp_sec();
-    struct tm timeinfo;
-    localtime_r(&now, &timeinfo);
+    
+    // Decompose local time according to SunSchedule's configured timezone
+    int64_t offset_sec = static_cast<int64_t>(sun_schedule_.get_tz_offset_hours() * 3600.0f);
+    time_t local_unix = now + offset_sec;
+    struct tm local_tm{};
+    gmtime_r(&local_unix, &local_tm);
 
     uint8_t target_brightness = BRIGHTNESS_NIGHT;
-    if (timeinfo.tm_hour >= 6 && timeinfo.tm_hour < 18) {
-        target_brightness = BRIGHTNESS_DAY;
+
+    if (sun_schedule_.is_daytime(now)) {
+        // 1. DAY: Sinusoidal interpolation from TWILIGHT (10) to MAX_DAY (80)
+        float elevation = sun_schedule_.get_sun_elevation_factor(now);
+        target_brightness = static_cast<uint8_t>(
+            BRIGHTNESS_TWILIGHT + elevation * (BRIGHTNESS_MAX_DAY - BRIGHTNESS_TWILIGHT)
+        );
     }
-    else if (timeinfo.tm_hour >= 18 && timeinfo.tm_hour < 22) {
+    else if (sun_schedule_.is_twilight(now, 30)) {
+        // 2. TWILIGHT: 30-min window before sunrise or after sunset
         target_brightness = BRIGHTNESS_TWILIGHT;
+    }
+    else if (local_tm.tm_hour >= 22 || local_tm.tm_hour < 5) {
+        // 3. MIDNIGHT: 22:00 to 05:00 blackout
+        target_brightness = BRIGHTNESS_MIDNIGHT;
+    }
+    else {
+        // 4. NIGHT: Evening between twilight and 22:00
+        target_brightness = BRIGHTNESS_NIGHT;
     }
 
     if (target_brightness != current_display_brightness_) {

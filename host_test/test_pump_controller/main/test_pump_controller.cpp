@@ -422,22 +422,26 @@ TEST_F(PumpControllerTest, TickRuntimeAccountingIncrementsHourmeter)
     EXPECT_EQ(sut_->get_stats().grid_runtime_s, 0);
 }
 
-static time_t make_test_time(int hour)
+static time_t make_test_time(int hour, int min = 0)
 {
+    // SunSchedule has DEFAULT_TZ_OFFSET_HOURS = -3.0.
+    // decompose(epoch) computes: local_unix = epoch + (-3h).
+    // So to simulate local time (e.g. 12:00 BRT), UTC epoch is (12 - (-3)) = 15:00 UTC.
     struct tm t{};
     t.tm_year = 2026 - 1900;
-    t.tm_mon = 5;
+    t.tm_mon = 5; // June (Winter in South hemisphere: sunrise ~06:45, sunset ~17:15)
     t.tm_mday = 15;
-    t.tm_hour = hour;
-    t.tm_min = 30;
+    t.tm_hour = hour + 3; // Convert local hour to UTC
+    t.tm_min = min;
     t.tm_sec = 0;
-    return mktime(&t);
+    return timegm(&t);
 }
 
 TEST_F(PumpControllerTest, TickUpdatesDisplayBrightnessToDayWhenSynchronized)
 {
     EXPECT_CALL(time_manager_, is_synchronized()).WillRepeatedly(Return(true));
-    EXPECT_CALL(time_manager_, get_timestamp_sec()).WillRepeatedly(Return(make_test_time(12))); // 12:30 (Day)
+    // 12:00 (Solar Noon -> Peak elevation 1.0 -> Peak brightness 80)
+    EXPECT_CALL(time_manager_, get_timestamp_sec()).WillRepeatedly(Return(make_test_time(12, 0)));
 
     EXPECT_CALL(display_, set_brightness(80)).Times(1);
     sut_->tick(10000); // 10s check interval
@@ -446,18 +450,30 @@ TEST_F(PumpControllerTest, TickUpdatesDisplayBrightnessToDayWhenSynchronized)
 TEST_F(PumpControllerTest, TickUpdatesDisplayBrightnessToTwilightWhenSynchronized)
 {
     EXPECT_CALL(time_manager_, is_synchronized()).WillRepeatedly(Return(true));
-    EXPECT_CALL(time_manager_, get_timestamp_sec()).WillRepeatedly(Return(make_test_time(19))); // 19:30 (Twilight)
+    // 17:25 (Sunset is ~17:15, 17:25 is within 30-min twilight window -> 10)
+    EXPECT_CALL(time_manager_, get_timestamp_sec()).WillRepeatedly(Return(make_test_time(17, 25)));
 
     EXPECT_CALL(display_, set_brightness(10)).Times(1);
     sut_->tick(10000);
 }
 
-TEST_F(PumpControllerTest, TickUpdatesDisplayBrightnessToNightWhenSynchronized)
+TEST_F(PumpControllerTest, TickUpdatesDisplayBrightnessToEveningNightWhenSynchronized)
 {
     EXPECT_CALL(time_manager_, is_synchronized()).WillRepeatedly(Return(true));
-    EXPECT_CALL(time_manager_, get_timestamp_sec()).WillRepeatedly(Return(make_test_time(23))); // 23:30 (Night)
+    // 20:00 (Evening Night -> Night brightness 5)
+    EXPECT_CALL(time_manager_, get_timestamp_sec()).WillRepeatedly(Return(make_test_time(20, 0)));
 
     EXPECT_CALL(display_, set_brightness(5)).Times(1);
+    sut_->tick(10000);
+}
+
+TEST_F(PumpControllerTest, TickUpdatesDisplayBrightnessToMidnightBlackoutWhenSynchronized)
+{
+    EXPECT_CALL(time_manager_, is_synchronized()).WillRepeatedly(Return(true));
+    // 23:30 (Midnight -> 0)
+    EXPECT_CALL(time_manager_, get_timestamp_sec()).WillRepeatedly(Return(make_test_time(23, 30)));
+
+    EXPECT_CALL(display_, set_brightness(0)).Times(1);
     sut_->tick(10000);
 }
 

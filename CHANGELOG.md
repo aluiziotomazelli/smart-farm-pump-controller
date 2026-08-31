@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.5] - 2026-08-31
+
+### Added
+- **Dynamic Solar-Elevation Display Brightness (`PumpController`)**:
+  - Integrated astronomical calculation via [`SunSchedule`](file:///home/german/dev/workspaces/smart-farm/smart-farm-pump-controller/components/smart-farm-common/include/sun_schedule.hpp) to continuously adapt LED strip brightness according to solar elevation:
+    - **Daytime:** Sinusoidal continuous interpolation from `BRIGHTNESS_TWILIGHT` (10) up to `BRIGHTNESS_MAX_DAY` (80) at solar noon.
+    - **Twilight:** Set to `BRIGHTNESS_TWILIGHT` (10) during dawn and dusk windows (30-min threshold).
+    - **Evening Night:** Soft nighttime illumination `BRIGHTNESS_NIGHT` (5) before 22:00.
+    - **Midnight Blackout:** Total display blackout `BRIGHTNESS_MIDNIGHT` (0) between 22:00 and 05:00/dawn.
+  - Added geographical location definitions (`LOCATION_LATITUDE_DEG`, `LOCATION_TZ_OFFSET_HOURS`) in `secrets.example.hpp` and automated injection in `PumpController` constructor to keep exact GPS coordinates private.
+
 ## [0.3.4] - 2026-08-30
 
 ### Added
