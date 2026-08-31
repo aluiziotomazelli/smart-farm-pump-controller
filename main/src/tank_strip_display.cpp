@@ -369,7 +369,7 @@ void TankStripDisplay::render_auto_pattern()
 {
     uint32_t active_leds = 0;
     if (backup_mode_active_) {
-        active_leds = float_switch_is_full_ ? config_.num_leds : (config_.num_leds > 0 ? (config_.num_leds / 4) : 0);
+        active_leds = float_switch_is_full_ ? config_.num_leds : (config_.num_leds >= 3 ? 3 : (config_.num_leds > 0 ? 1 : 0));
     }
     else {
         active_leds = calculate_active_leds(level_permille_);
