@@ -5,6 +5,31 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.4] - 2026-08-30
+
+### Added
+- **Production `OutputMonitor` Driver (`IOutputMonitor`)**:
+  - Implemented concrete driver [`OutputMonitor`](file:///home/german/dev/workspaces/smart-farm/smart-farm-pump-controller/main/include/output_monitor.hpp) utilizing `IGpioHAL` to perform non-blocking sampling of motor AC output terminal voltage.
+  - Added [`OutputMonitorConfig`](file:///home/german/dev/workspaces/smart-farm/smart-farm-pump-controller/main/include/pump_types.hpp) with configurable pin, active level, and pull-up/down modes (default `GPIO 10 / D10`, active-high with pull-down).
+  - Added dedicated host unit tests in `host_test/test_output_monitor`.
+- **On-Target Hardware-in-the-Loop (HIL) Test Suite (`test_apps/test_on_target`)**:
+  - Created standalone ESP-IDF + Unity test harness for Seeed Studio XIAO ESP32-C3 with loopback jumpers (`D6->D10`, `D7->D2`, `D8->D1`, `D9->D0`).
+  - Implemented 7 on-target test cases validating real silicon behavior:
+    - Output voltage sensor reading on physical GPIO.
+    - 3-position selector switch with hardware debounce.
+    - Contactor break-before-make interlock and demagnetization delay on actual output pins (`D3`, `D4`).
+    - Full `PumpStateMachine` output validation (contactor stuck and power loss detection).
+    - Manual start/stop via pushbutton and live hot-switching.
+    - Remote fill watchdog timeout safety protection.
+    - Visual LED strip pattern demonstration on `D5` (WS2812B).
+
+### Changed
+- **Contactor GPIO Pin Mode**:
+  - Configured contactor GPIOs as `GPIO_MODE_INPUT_OUTPUT` in `ContactorController::init()` allowing direct register readback of output level.
+- **Diffuser-Optimized LED Strip Display (`TankStripDisplay`)**:
+  - In backup mode (`!float_switch_is_full_`), lights up a base of 3 LEDs (LEDs 0, 1, 2) in Amber to provide optimal visibility through diffuser panels.
+  - In timeout alert (`render_timeout`), blinks the top two active LEDs in Amber while keeping lower level LEDs stable.
+
 ## [0.3.3] - 2026-08-30
 
 ### Added

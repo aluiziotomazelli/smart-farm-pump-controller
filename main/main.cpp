@@ -26,7 +26,7 @@
 #include "time_manager.hpp"
 #include "contactor_controller.hpp"
 #include "tank_strip_display.hpp"
-#include "null_output_monitor.hpp"
+#include "output_monitor.hpp"
 #include "pump_state_machine.hpp"
 #include "pump_command_handler.hpp"
 #include "pump_status_reporter.hpp"
@@ -54,6 +54,7 @@ static constexpr gpio_num_t PIN_CONTACTOR_GRID = GPIO_NUM_5;  // D3
 static constexpr gpio_num_t PIN_CONTACTOR_SOLAR = GPIO_NUM_6; // D4
 static constexpr gpio_num_t PIN_LED_STRIP_DATA = GPIO_NUM_7;  // D5 (Addressable WS2812 strip DIN)
 static constexpr gpio_num_t PIN_BUTTON_BOOT_OTA = GPIO_NUM_9; // D9 (Onboard BOOT button)
+static constexpr gpio_num_t PIN_OUTPUT_MONITOR = GPIO_NUM_10; // D10 (AC Output Voltage Detector)
 
 static constexpr const char* CORE_NVS_KEY = "core";
 static constexpr const char* PUMP_STATS_NVS_KEY = "pump_stats";
@@ -92,7 +93,12 @@ static ContactorConfig contactor_config{
     .demagnetization_delay_ms = 500};
 static ContactorController contactor_ctrl{hal_gpio, hal_freertos, contactor_config};
 
-static NullOutputMonitor output_monitor;
+static OutputMonitorConfig monitor_config{
+    .gpio_pin = PIN_OUTPUT_MONITOR,
+    .active_level = 1, // 1 when AC voltage present (Optocoupler output High)
+    .pull_down_en = true,
+    .pull_up_en = false};
+static OutputMonitor output_monitor{hal_gpio, monitor_config};
 
 // Addressable LED Strip Unified Display (Level + Pump & OTA status)
 static TankStripConfig strip_cfg{
@@ -105,7 +111,7 @@ static TankStripDisplay tank_display{hal_led_strip, hal_freertos, strip_cfg};
 // State Machine
 static PumpStateMachineConfig fsm_config{
     .default_watchdog_s = 3600,
-    .enable_output_validation = false,
+    .enable_output_validation = false, // Disabled until physical sensor is connected
     .nominal_power_w = 320};
 static PumpStateMachine state_machine{contactor_ctrl, output_monitor, fsm_config};
 

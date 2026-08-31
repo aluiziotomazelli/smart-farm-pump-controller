@@ -18,6 +18,18 @@ struct ContactorConfig
 };
 
 /**
+ * @struct OutputMonitorConfig
+ * @brief Configuration parameters for AC output voltage monitor sensor.
+ */
+struct OutputMonitorConfig
+{
+    gpio_num_t gpio_pin{GPIO_NUM_10}; ///< D10 on Xiao C3 (AC Output Voltage Detector)
+    uint8_t active_level{1};          ///< 1 if High indicates voltage presence, 0 if Low indicates voltage presence
+    bool pull_down_en{true};          ///< Enable internal pull-down if sensor output is active-high open/floating
+    bool pull_up_en{false};           ///< Enable internal pull-up if sensor output is open-collector / active-low
+};
+
+/**
  * @struct PumpStateSnapshot
  * @brief Current operational snapshot of the pump state machine.
  */

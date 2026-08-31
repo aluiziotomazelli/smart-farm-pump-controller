@@ -1,0 +1,28 @@
+idf_component_register(
+    SRCS
+        "main.cpp"
+        "test_pump_on_target.cpp"
+        "../../../main/src/output_monitor.cpp"
+        "../../../main/src/contactor_controller.cpp"
+        "../../../main/src/pump_state_machine.cpp"
+        "../../../main/src/hal_led_strip.cpp"
+        "../../../main/src/tank_strip_display.cpp"
+    INCLUDE_DIRS
+        "."
+        "../../../main/include"
+        "../../../main/include/interfaces"
+        "../../../components/idf_hals/include"
+        "../../../components/idf_hals/include/interfaces"
+        "../../../components/smart-farm-common/include"
+        "../../../components/smart-farm-common/include/interfaces"
+        "../../../components/ui_inputs/include"
+        "../../../components/time_manager/include"
+    REQUIRES
+        unity
+        idf_hals
+        smart-farm-common
+        ui_inputs
+        time_manager
+        espressif__led_strip
+    WHOLE_ARCHIVE
+)

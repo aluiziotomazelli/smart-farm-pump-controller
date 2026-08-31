@@ -20,6 +20,7 @@ add_test(NAME test_pump_state_machine COMMAND ../test_pump_state_machine/build/t
 add_test(NAME test_pump_command_handler COMMAND ../test_pump_command_handler/build/test_pump_command_handler.elf)
 add_test(NAME test_pump_status_reporter COMMAND ../test_pump_status_reporter/build/test_pump_status_reporter.elf)
 add_test(NAME test_contactor_controller COMMAND ../test_contactor_controller/build/test_contactor_controller.elf)
+add_test(NAME test_output_monitor COMMAND ../test_output_monitor/build/test_output_monitor.elf)
 add_test(NAME test_pump_controller COMMAND ../test_pump_controller/build/test_pump_controller.elf)
 add_test(NAME test_ota_controller COMMAND ../test_ota_controller/build/test_ota_controller.elf)
 add_test(NAME test_tank_strip_display COMMAND ../test_tank_strip_display/build/test_tank_strip_display.elf)
@@ -56,6 +57,7 @@ add_custom_target(build_all_tests
     COMMAND idf.py -C ../test_pump_command_handler build
     COMMAND idf.py -C ../test_pump_status_reporter build
     COMMAND idf.py -C ../test_contactor_controller build
+    COMMAND idf.py -C ../test_output_monitor build
     COMMAND idf.py -C ../test_pump_controller build
     COMMAND idf.py -C ../test_ota_controller build
     COMMAND idf.py -C ../test_tank_strip_display build

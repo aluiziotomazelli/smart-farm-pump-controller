@@ -212,7 +212,7 @@ The addressable WS2812B LED strip (20 LEDs default) is driven by a dedicated Fre
 | Mode / State | Animation Pattern | Description |
 | :--- | :--- | :--- |
 | **IDLE (AUTO)** | Static Cyan Bar + Breathing Wave | Shows current tank level in Cyan (`HUE_FILL`). Pulses in brightness on every received telemetry packet. |
-| **IDLE (AUTO - Backup Mode)** | Amber Bar (Full or Base LED 0) + Breathing Wave | When Water Tank operates in backup mode (`backup_mode_active`), base water shifts from Cyan to Amber (`HUE_BACKUP`). Full strip lights up if `float_switch_is_full == true`; only base LED 0 lights up if not full. |
+| **IDLE (AUTO - Backup Mode)** | Amber Bar (Full or 1/4 of `num_leds`) + Breathing Wave | When Water Tank operates in backup mode (`backup_mode_active`), base water shifts from Cyan to Amber (`HUE_BACKUP`). Full strip lights up if `float_switch_is_full == true`; 1/4 of `num_leds` lights up if not full. |
 | **IDLE (SOURCE_LOCKED)** | Cyan/Amber Bar + Top LED Color Accent | Shows tank level in Cyan (or Amber in backup), with the top LED highlighted in Green (`HUE_SOLAR`) or Red (`HUE_GRID`) indicating the locked source. |
 | **RUNNING (AUTO - Solar)** | Cyan/Amber Bar + Green Chasing LED | Base water level in Cyan (or Amber in backup) with a Green LED chasing upwards (200 ms/LED). |
 | **RUNNING (AUTO - Grid)** | Cyan/Amber Bar + Red Chasing LED | Base water level in Cyan (or Amber in backup) with a Red LED chasing upwards (200 ms/LED). |
