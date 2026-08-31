@@ -26,8 +26,8 @@
 // =============================================================================
 // Geographical Location & Timezone (SunSchedule & Astronomy)
 // =============================================================================
-#define LOCATION_LATITUDE_DEG   -23.55f   // Geographical Latitude (e.g., -23.55 for São Paulo)
-#define LOCATION_TZ_OFFSET_HOURS -3.0f    // Local Timezone offset from UTC (e.g., -3.0 for Brasília / BRT)
+static constexpr float LOCATION_LATITUDE_DEG = -23.55f;   // Geographical Latitude (e.g., -23.55 for São Paulo)
+static constexpr float LOCATION_TZ_OFFSET_HOURS = -3.0f;  // Local Timezone offset from UTC (e.g., -3.0 for Brasília / BRT)
 
 // =============================================================================
 // Hub MAC Address (Optional / Peer Registration)

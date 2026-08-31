@@ -62,9 +62,7 @@ PumpController::PumpController(
     , hal_rtos_(hal_rtos)
     , hal_system_(hal_system)
 {
-#if defined(LOCATION_LATITUDE_DEG) && defined(LOCATION_TZ_OFFSET_HOURS)
     sun_schedule_.set_location(LOCATION_LATITUDE_DEG, LOCATION_TZ_OFFSET_HOURS);
-#endif
 }
 
 PumpController::~PumpController()
