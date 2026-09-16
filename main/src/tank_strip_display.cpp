@@ -1,5 +1,4 @@
 // main/src/tank_strip_display.cpp
-#include <cmath>
 #include <cstdint>
 
 #define LOG_LOCAL_LEVEL ESP_LOG_INFO
@@ -28,7 +27,7 @@ static constexpr uint8_t VAL_FULL = 255;
 static constexpr uint8_t VAL_CYAN = 200;
 static constexpr uint8_t VAL_BACKUP = 220;
 
-static constexpr uint16_t IDLE_BREATHE_DURATION_MS = 1200;
+static constexpr uint16_t IDLE_BREATHE_DURATION_MS = 1600;
 
 TankStripDisplay::TankStripDisplay(
     IHalLedStrip& hal_strip,
@@ -123,7 +122,7 @@ esp_err_t TankStripDisplay::start()
         return ESP_FAIL;
     }
 
-    ESP_LOGI(TAG, "TankStripDisplay task started (Priority 2, 20 FPS)");
+    ESP_LOGI(TAG, "TankStripDisplay task started (Priority 2, 40 FPS)");
     return ESP_OK;
 }
 
@@ -349,10 +348,10 @@ void TankStripDisplay::run_task()
             }
         }
 
-        // Render frame at 20 FPS (50ms)
-        process_frame(50);
+        // Render frame at 40 FPS (25ms)
+        process_frame(25);
 
-        hal_freertos_.task_delay(pdMS_TO_TICKS(50));
+        hal_freertos_.task_delay(pdMS_TO_TICKS(25));
     }
 }
 
@@ -369,7 +368,8 @@ void TankStripDisplay::render_auto_pattern()
 {
     uint32_t active_leds = 0;
     if (backup_mode_active_) {
-        active_leds = float_switch_is_full_ ? config_.num_leds : (config_.num_leds >= 3 ? 3 : (config_.num_leds > 0 ? 1 : 0));
+        active_leds =
+            float_switch_is_full_ ? config_.num_leds : (config_.num_leds >= 3 ? 3 : (config_.num_leds > 0 ? 1 : 0));
     }
     else {
         active_leds = calculate_active_leds(level_permille_);
@@ -400,20 +400,25 @@ void TankStripDisplay::render_auto_pattern()
 
 void TankStripDisplay::render_idle(uint32_t active_leds, farm::ControlMode mode, farm::PowerSource source)
 {
-    // Smooth single wave breathing on data update (Value: 100% -> 40% -> 100%)
-    float factor = 1.0f;
+    // Smooth integer triangular breathing wave on data update (Value: 100% -> 20% -> 100%)
+    uint8_t factor_255 = 255;
     if (idle_breathe_timer_ms_ > 0) {
-        float t = static_cast<float>(IDLE_BREATHE_DURATION_MS - idle_breathe_timer_ms_) /
-                  static_cast<float>(IDLE_BREATHE_DURATION_MS);
-        factor = 0.2f + 0.8f * 0.5f * (1.0f + std::cos(2.0f * 3.14159265f * t));
+        uint32_t elapsed_ms = IDLE_BREATHE_DURATION_MS - idle_breathe_timer_ms_;
+        uint32_t phase = (elapsed_ms * 512) / IDLE_BREATHE_DURATION_MS;
+        if (phase > 511) {
+            phase = 511;
+        }
+        uint8_t wave = (phase < 256) ? static_cast<uint8_t>(phase) : static_cast<uint8_t>(511 - phase);
+        // Map wave 0..255 to factor_255: 255 -> 51 (20%) -> 255 (100%)
+        factor_255 = static_cast<uint8_t>(255 - ((255 - 51) * wave) / 255);
     }
 
     uint16_t fill_hue = backup_mode_active_ ? HUE_BACKUP : HUE_FILL;
     uint8_t fill_sat = backup_mode_active_ ? SAT_BACKUP : SAT_CYAN;
     uint8_t base_val = backup_mode_active_ ? VAL_BACKUP : VAL_CYAN;
 
-    uint8_t val_fill = static_cast<uint8_t>(base_val * factor);
-    uint8_t val_full = static_cast<uint8_t>(VAL_FULL * factor);
+    uint8_t val_fill = static_cast<uint8_t>((static_cast<uint16_t>(base_val) * factor_255) / 255);
+    uint8_t val_full = static_cast<uint8_t>((static_cast<uint16_t>(VAL_FULL) * factor_255) / 255);
 
     bool is_locked = (source == farm::PowerSource::SOLAR || source == farm::PowerSource::GRID);
 
@@ -422,7 +427,8 @@ void TankStripDisplay::render_idle(uint32_t active_leds, farm::ControlMode mode,
 
         if (active_leds == 0) {
             // Tank empty with locked source: LED 0 pulses gently in source color
-            render_pixel_hsv(0, locked_hue, SAT_FULL, static_cast<uint8_t>(80 * factor));
+            render_pixel_hsv(
+                0, locked_hue, SAT_FULL, static_cast<uint8_t>((static_cast<uint16_t>(80) * factor_255) / 255));
             for (uint32_t i = 1; i < config_.num_leds; i++) {
                 render_pixel_hsv(i, 0, 0, 0);
             }
@@ -482,8 +488,7 @@ void TankStripDisplay::render_filling_auto(uint32_t active_leds, farm::PowerSour
     }
     else {
         // Tank full: Top LED pulses in source color
-        float phase = static_cast<float>(chase_timer_ms_) / 200.0f;
-        uint8_t top_val = (phase < 0.2f) ? VAL_FULL : VAL_FULL / 4;
+        uint8_t top_val = (chase_timer_ms_ < 40) ? VAL_FULL : (VAL_FULL / 4);
         render_pixel_hsv(config_.num_leds - 1, source_hue, SAT_FULL, top_val);
     }
 }
@@ -513,8 +518,7 @@ void TankStripDisplay::render_filling_manual(uint32_t active_leds, farm::PowerSo
     }
     else {
         // Full tank manual: Top LED flashes
-        float phase = static_cast<float>(chase_timer_ms_) / 200.0f;
-        uint8_t top_val = (phase < 0.2f) ? VAL_FULL : VAL_FULL / 4;
+        uint8_t top_val = (chase_timer_ms_ < 40) ? VAL_FULL : (VAL_FULL / 4);
         render_pixel_hsv(config_.num_leds - 1, source_hue, SAT_FULL, top_val);
     }
 }
@@ -548,10 +552,13 @@ void TankStripDisplay::render_timeout(uint32_t active_leds)
 
 void TankStripDisplay::render_fault(uint32_t active_leds)
 {
-    // Fast Red breathing at 2Hz across the entire strip
-    float phase = static_cast<float>(error_timer_ms_ % 500) / 500.0f;
-    float intensity = 0.2f + 0.8f * 0.5f * (1.0f + std::cos(2.0f * 3.14159265f * phase));
-    uint8_t val = static_cast<uint8_t>(VAL_FULL * intensity);
+    static constexpr uint32_t FAULT_BREATHE_DURATION_MS = 1000;
+
+    // Red breathing (1000ms cycle) across the entire strip
+    uint32_t phase = ((error_timer_ms_ % FAULT_BREATHE_DURATION_MS) * 512) / FAULT_BREATHE_DURATION_MS;
+    uint8_t wave = (phase < 256) ? static_cast<uint8_t>(phase) : static_cast<uint8_t>(511 - phase);
+    uint8_t factor_255 = static_cast<uint8_t>(255 - ((255 - 51) * wave) / 255);
+    uint8_t val = static_cast<uint8_t>((static_cast<uint16_t>(VAL_FULL) * factor_255) / 255);
 
     for (uint32_t i = 0; i < config_.num_leds; i++) {
         render_pixel_hsv(i, HUE_FAULT, SAT_FULL, val);
@@ -571,10 +578,10 @@ void TankStripDisplay::render_ota()
         render_pixel_hsv(static_cast<uint32_t>(pos), HUE_OTA, SAT_FULL, VAL_FULL);
     }
     if (pos - 1 >= 0 && pos - 1 < static_cast<int32_t>(config_.num_leds)) {
-        render_pixel_hsv(static_cast<uint32_t>(pos - 1), HUE_OTA, SAT_FULL, VAL_FULL / 6);
+        render_pixel_hsv(static_cast<uint32_t>(pos - 1), HUE_OTA, SAT_FULL, VAL_FULL / 8);
     }
     if (pos + 1 >= 0 && pos + 1 < static_cast<int32_t>(config_.num_leds)) {
-        render_pixel_hsv(static_cast<uint32_t>(pos + 1), HUE_OTA, SAT_FULL, VAL_FULL / 6);
+        render_pixel_hsv(static_cast<uint32_t>(pos + 1), HUE_OTA, SAT_FULL, VAL_FULL / 8);
     }
 }
 

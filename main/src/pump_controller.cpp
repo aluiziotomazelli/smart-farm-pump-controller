@@ -620,13 +620,13 @@ void PumpController::update_display_brightness(uint32_t delta_ms)
     }
     brightness_check_accumulator_ms_ = 0;
 
-    static constexpr uint8_t BRIGHTNESS_MAX_DAY  = 80; // Solar noon peak
-    static constexpr uint8_t BRIGHTNESS_TWILIGHT = 10; // Dawn / Dusk / Daytime baseline
-    static constexpr uint8_t BRIGHTNESS_NIGHT    = 5;  // Early night before midnight
-    static constexpr uint8_t BRIGHTNESS_MIDNIGHT = 0;  // 22:00 to dawn (total blackout)
+    static constexpr uint8_t BRIGHTNESS_MAX_DAY = 80;  // Solar noon peak
+    static constexpr uint8_t BRIGHTNESS_TWILIGHT = 20; // Dawn / Dusk / Daytime baseline
+    static constexpr uint8_t BRIGHTNESS_NIGHT = 10;    // Early night before midnight
+    static constexpr uint8_t BRIGHTNESS_MIDNIGHT = 4;  // 22:00 to dawn (total blackout)
 
     time_t now = time_manager_.get_timestamp_sec();
-    
+
     // Decompose local time according to SunSchedule's configured timezone
     int64_t offset_sec = static_cast<int64_t>(sun_schedule_.get_tz_offset_hours() * 3600.0f);
     time_t local_unix = now + offset_sec;
@@ -638,9 +638,8 @@ void PumpController::update_display_brightness(uint32_t delta_ms)
     if (sun_schedule_.is_daytime(now)) {
         // 1. DAY: Sinusoidal interpolation from TWILIGHT (10) to MAX_DAY (80)
         float elevation = sun_schedule_.get_sun_elevation_factor(now);
-        target_brightness = static_cast<uint8_t>(
-            BRIGHTNESS_TWILIGHT + elevation * (BRIGHTNESS_MAX_DAY - BRIGHTNESS_TWILIGHT)
-        );
+        target_brightness =
+            static_cast<uint8_t>(BRIGHTNESS_TWILIGHT + elevation * (BRIGHTNESS_MAX_DAY - BRIGHTNESS_TWILIGHT));
     }
     else if (sun_schedule_.is_twilight(now, 30)) {
         // 2. TWILIGHT: 30-min window before sunrise or after sunset
