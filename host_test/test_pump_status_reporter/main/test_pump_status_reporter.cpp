@@ -5,7 +5,7 @@
 #include <cstring>
 
 #include "pump_status_reporter.hpp"
-#include "mock_espnow_manager.hpp"
+#include "mocks/mock_espnow_manager.hpp"
 #include "mock_pump_state_machine.hpp"
 #include "mock_hal_timer.hpp"
 #include "mock_time_manager.hpp"

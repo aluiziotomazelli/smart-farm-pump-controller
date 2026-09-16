@@ -195,8 +195,8 @@ TEST_F(TankStripDisplayTest, IdleRendersStaticCyanProportionalToLevelInAuto)
         .type = DisplayCmdType::UPDATE_STATE,
         .state_data = {.state = farm::LoadState::IDLE, .mode = farm::ControlMode::AUTO, .source = farm::PowerSource::UNKNOWN}});
 
-    // Advance past initial breathing timer (600ms)
-    display_->process_frame(700);
+    // Advance past initial breathing timer (1600ms)
+    display_->process_frame(2000);
     captured_pixels_.clear();
 
     // Now process in pure static state
@@ -226,7 +226,7 @@ TEST_F(TankStripDisplayTest, IdleSourceLockedSolarRendersCyanBaseAndGreenTopLed)
         .type = DisplayCmdType::UPDATE_STATE,
         .state_data = {.state = farm::LoadState::IDLE, .mode = farm::ControlMode::AUTO, .source = farm::PowerSource::SOLAR}});
 
-    display_->process_frame(700); // Settle breathing
+    display_->process_frame(2000); // Settle breathing
     captured_pixels_.clear();
 
     display_->process_frame(50);
@@ -257,7 +257,7 @@ TEST_F(TankStripDisplayTest, IdleSourceLockedGridRendersCyanBaseAndRedTopLed)
         .type = DisplayCmdType::UPDATE_STATE,
         .state_data = {.state = farm::LoadState::IDLE, .mode = farm::ControlMode::AUTO, .source = farm::PowerSource::GRID}});
 
-    display_->process_frame(700); // Settle breathing
+    display_->process_frame(2000); // Settle breathing
     captured_pixels_.clear();
 
     display_->process_frame(50);
@@ -572,7 +572,7 @@ TEST_F(TankStripDisplayTest, IdleBackupMode_FloatFull_RendersAllAmberLeds)
     EXPECT_TRUE(display_->is_float_full());
 
     // Advance past initial breathing timer
-    display_->process_frame(700);
+    display_->process_frame(2000);
     captured_pixels_.clear();
 
     display_->process_frame(50);

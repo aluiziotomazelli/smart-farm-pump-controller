@@ -24,6 +24,7 @@ idf_component_register(
         "../../../components/ota_manager/host_test/mocks"
         "../../../components/ui_inputs/include"
         "../../../components/ui_inputs/include/interfaces"
+        "../../../components/ui_inputs/host_test/common"
         "../../../components/idf_hals/include"
         "../../../components/idf_hals/include/interfaces"
         "../../../components/idf_hals/mocks"

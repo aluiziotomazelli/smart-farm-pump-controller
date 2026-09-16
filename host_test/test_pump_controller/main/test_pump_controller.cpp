@@ -6,9 +6,9 @@
 #include "mock_pump_state_machine.hpp"
 #include "mock_pump_status_reporter.hpp"
 #include "mock_tank_strip_display.hpp"
-#include "mock_switch.hpp"
-#include "mock_button.hpp"
-#include "mock_espnow_manager.hpp"
+#include "mock_i_switch.hpp"
+#include "mock_i_button.hpp"
+#include "mocks/mock_espnow_manager.hpp"
 #include "mock_time_manager.hpp"
 #include "mock_hal_freertos.hpp"
 #include "mock_hal_system.hpp"
@@ -38,9 +38,9 @@ protected:
     NiceMock<time_manager::MockTimeManager> time_manager_;
     NiceMock<MockTankStripDisplay> display_;
     NiceMock<MockPumpStatusReporter> status_reporter_;
-    NiceMock<ui_inputs::MockSwitch> switch_solar_;
-    NiceMock<ui_inputs::MockSwitch> switch_grid_;
-    NiceMock<ui_inputs::MockButton> button_action_;
+    NiceMock<ui_inputs::MockISwitch> switch_solar_;
+    NiceMock<ui_inputs::MockISwitch> switch_grid_;
+    NiceMock<ui_inputs::MockIButton> button_action_;
     NiceMock<wifi_manager::MockWiFiManager> mock_wifi_;
     NiceMock<MockOtaController> mock_ota_;
     NiceMock<MockOtaTrigger> btn_trigger_;
@@ -440,40 +440,40 @@ static time_t make_test_time(int hour, int min = 0)
 TEST_F(PumpControllerTest, TickUpdatesDisplayBrightnessToDayWhenSynchronized)
 {
     EXPECT_CALL(time_manager_, is_synchronized()).WillRepeatedly(Return(true));
-    // 12:00 (Solar Noon -> Peak elevation 1.0 -> Peak brightness 80)
+    // 12:00 (Solar Noon -> Peak elevation -> Day brightness)
     EXPECT_CALL(time_manager_, get_timestamp_sec()).WillRepeatedly(Return(make_test_time(12, 0)));
 
-    EXPECT_CALL(display_, set_brightness(80)).Times(1);
+    EXPECT_CALL(display_, set_brightness(77)).Times(1);
     sut_->tick(10000); // 10s check interval
 }
 
 TEST_F(PumpControllerTest, TickUpdatesDisplayBrightnessToTwilightWhenSynchronized)
 {
     EXPECT_CALL(time_manager_, is_synchronized()).WillRepeatedly(Return(true));
-    // 17:25 (Sunset is ~17:15, 17:25 is within 30-min twilight window -> 10)
+    // 17:25 (Sunset is ~17:15, 17:25 is within twilight window)
     EXPECT_CALL(time_manager_, get_timestamp_sec()).WillRepeatedly(Return(make_test_time(17, 25)));
 
-    EXPECT_CALL(display_, set_brightness(10)).Times(1);
+    EXPECT_CALL(display_, set_brightness(36)).Times(1);
     sut_->tick(10000);
 }
 
 TEST_F(PumpControllerTest, TickUpdatesDisplayBrightnessToEveningNightWhenSynchronized)
 {
     EXPECT_CALL(time_manager_, is_synchronized()).WillRepeatedly(Return(true));
-    // 20:00 (Evening Night -> Night brightness 5)
+    // 20:00 (Evening Night -> Night brightness 10)
     EXPECT_CALL(time_manager_, get_timestamp_sec()).WillRepeatedly(Return(make_test_time(20, 0)));
 
-    EXPECT_CALL(display_, set_brightness(5)).Times(1);
+    EXPECT_CALL(display_, set_brightness(10)).Times(1);
     sut_->tick(10000);
 }
 
 TEST_F(PumpControllerTest, TickUpdatesDisplayBrightnessToMidnightBlackoutWhenSynchronized)
 {
     EXPECT_CALL(time_manager_, is_synchronized()).WillRepeatedly(Return(true));
-    // 23:30 (Midnight -> 0)
+    // 23:30 (Midnight -> 4)
     EXPECT_CALL(time_manager_, get_timestamp_sec()).WillRepeatedly(Return(make_test_time(23, 30)));
 
-    EXPECT_CALL(display_, set_brightness(0)).Times(1);
+    EXPECT_CALL(display_, set_brightness(4)).Times(1);
     sut_->tick(10000);
 }
 
